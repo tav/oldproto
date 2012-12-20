@@ -1,0 +1,169 @@
+#! /usr/bin/env python
+
+# Public Domain (-) 2008-2012 The Espra Authors.
+# See the Espra UNLICENSE file for details.
+
+"""Build script for Proto Espra."""
+
+from cStringIO import StringIO
+from os import mkdir
+from os.path import dirname, exists, join
+from shutil import rmtree
+from sys import argv, exit, platform
+from urllib import urlopen
+from zipfile import ZipFile
+
+# ------------------------------------------------------------------------------
+# Print Utilities
+# ------------------------------------------------------------------------------
+
+def error(msg):
+    print "\033[1;31m!! ERROR: %s !!\033[0m" % msg
+    exit(1)
+
+def start(msg):
+    print "\033[1;34m>> %s\033[0m" % msg
+
+def progress(msg):
+    print "\033[1;30m## %s\033[0m" % msg
+
+def success(msg):
+    print "\033[32m** %s\033[0m" % msg
+
+# ------------------------------------------------------------------------------
+# Platform Detection
+# ------------------------------------------------------------------------------
+
+if platform.startswith('darwin'):
+    PLATFORM = 'darwin'
+elif platform.startswith('linux'):
+    PLATFORM = 'linux'
+else:
+    error("The %r operating system isn't currently supported" % platform)
+
+# ------------------------------------------------------------------------------
+# Global Constants
+# ------------------------------------------------------------------------------
+
+GAE_VERSION = "1.7.4"
+GAE_VERSION_NAME = "1.7.4"
+
+GAE_SDK_FILES = {
+    'java': "appengine-java-sdk-%s.zip" % GAE_VERSION,
+    'go': "go_appengine_sdk_%s_amd64-%s.zip" % (PLATFORM, GAE_VERSION),
+    'python': "google_appengine_%s.zip" % GAE_VERSION
+    }
+
+GAE_SDK_PATH_ROOT = "http://googleappengine.googlecode.com/files/"
+
+SCRIPT_ROOT = dirname(__file__)
+
+# -----------------------------------------------------------------------------
+# Command Decorator
+# -----------------------------------------------------------------------------
+
+COMMANDS = {}
+
+def register(func):
+    COMMANDS[func.__name__] = func
+
+# ------------------------------------------------------------------------------
+# Google App Engine SDK Downloader
+# ------------------------------------------------------------------------------
+
+def download_gae_sdk(runtime):
+
+    name = "%s App Engine SDK" % runtime.title()
+    filename = GAE_SDK_FILES[runtime]
+    target_dir = join(SCRIPT_ROOT, '.appengine_%s_sdk' % runtime)
+    version_file = join(target_dir, 'VERSION')
+
+    if runtime == 'java':
+        if exists(join(
+            target_dir, 'lib', 'user',
+            'appengine-api-labs-%s.jar' % GAE_VERSION
+            )):
+            return
+    elif exists(version_file):
+        sdk_version_file = open(version_file, 'rb')
+        sdk_version = sdk_version_file.readline().split()
+        sdk_version = sdk_version and sdk_version[-1] or ''
+        sdk_version_file.close()
+        if sdk_version == '"%s"' % GAE_VERSION_NAME:
+            return
+
+    start("Installing %s" % name)
+
+    if exists(target_dir):
+        progress("Removing Existing %s %s" % (name, sdk_version))
+        rmtree(target_dir)
+
+    progress("Downloading %s..." % name)
+
+    try:
+        req = urlopen(GAE_SDK_PATH_ROOT + filename)
+        sdk_file = StringIO(req.read())
+    except Exception, err:
+        error("Couldn't Download the %s: %r" % (name, err))
+
+    progress("Extracting %s" % name)
+    try:
+        mkdir(target_dir, 0777)
+        sdk_zip = ZipFile(sdk_file)
+        for iname in sdk_zip.namelist():
+            newname = iname.split("/", 1)
+            if len(newname) != 2:
+                continue
+            newname = newname[1]
+            if not newname:
+                continue
+            if iname.endswith('/'):
+                mkdir(join(target_dir, newname))
+            else:
+                newfile = open(join(target_dir, newname), 'wb')
+                newfile.write(sdk_zip.read(iname))
+                newfile.close()
+    except Exception, err:
+        error("Couldn't Extract the %s: %r" % (name, err))
+
+    success("%s Successfully Installed." % name)
+
+# ------------------------------------------------------------------------------
+# Core Tasks
+# ------------------------------------------------------------------------------
+
+@register
+def install():
+    """install the various dependencies"""
+
+    download_gae_sdk('java')
+    download_gae_sdk('python')
+
+@register
+def run():
+    """build and run a local instance"""
+
+@register
+def deploy():
+    """deploy a production build"""
+
+# -----------------------------------------------------------------------------
+# Script Runner
+# -----------------------------------------------------------------------------
+
+if __name__ == '__main__':
+    argv = argv[1:]
+    if not argv or argv[0] in ('-h', '--help', 'help'):
+        spacing = max(len(cmd) for cmd in COMMANDS) + 5
+        print "Usage: build [command]\n"
+        print "Commands:\n"
+        for cmd in sorted(COMMANDS):
+            pad = (spacing - len(cmd)) * ' '
+            print "\t%s%s%s" % (cmd, pad, COMMANDS[cmd].__doc__)
+        print
+        exit(0)
+    for cmd in argv:
+        if cmd not in COMMANDS:
+            error("Couldn't find the %s command" % cmd)
+    for cmd in argv:
+        COMMANDS[cmd]()
