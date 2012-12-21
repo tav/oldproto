@@ -1,4 +1,4 @@
-#! /usr/bin/env python
+#! /usr/bin/env python2.7
 
 # Public Domain (-) 2008-2012 The Espra Authors.
 # See the Espra UNLICENSE file for details.
@@ -6,12 +6,16 @@
 """Build script for Proto Espra."""
 
 from cStringIO import StringIO
+from hashlib import sha256
+from inspect import getargspec
 from os import mkdir
 from os.path import dirname, exists, join
 from shutil import rmtree
 from sys import argv, exit, platform
 from urllib import urlopen
 from zipfile import ZipFile
+
+from yaml import load as parse_yaml
 
 # ------------------------------------------------------------------------------
 # Print Utilities
@@ -42,20 +46,28 @@ else:
     error("The %r operating system isn't currently supported" % platform)
 
 # ------------------------------------------------------------------------------
+# YAML Config Handling
+# ------------------------------------------------------------------------------
+
+def get_yaml_conf(filename):
+    f = open(join(dirname(__file__), filename), 'rb')
+    conf = parse_yaml(f)
+    f.close()
+    return conf
+
+# ------------------------------------------------------------------------------
 # Global Constants
 # ------------------------------------------------------------------------------
 
-GAE_VERSION = "1.7.4"
-GAE_VERSION_NAME = "1.7.4"
+META = get_yaml_conf('meta.yaml')
 
 GAE_SDK_FILES = {
-    'java': "appengine-java-sdk-%s.zip" % GAE_VERSION,
-    'go': "go_appengine_sdk_%s_amd64-%s.zip" % (PLATFORM, GAE_VERSION),
-    'python': "google_appengine_%s.zip" % GAE_VERSION
-    }
+    'java': "appengine-java-sdk-%s.zip" % META['gae-version'],
+    'go': "go_appengine_sdk_%s_amd64-%s.zip" % (PLATFORM, META['gae-version']),
+    'python': "google_appengine_%s.zip" % META['gae-version']
+}
 
 GAE_SDK_PATH_ROOT = "http://googleappengine.googlecode.com/files/"
-
 SCRIPT_ROOT = dirname(__file__)
 
 # -----------------------------------------------------------------------------
@@ -65,10 +77,10 @@ SCRIPT_ROOT = dirname(__file__)
 COMMANDS = {}
 
 def register(func):
-    COMMANDS[func.__name__] = func
+    COMMANDS[func.__name__.replace('_', '-')] = (getargspec(func), func)
 
 # ------------------------------------------------------------------------------
-# Google App Engine SDK Downloader
+# Download Handlers
 # ------------------------------------------------------------------------------
 
 def download_gae_sdk(runtime):
@@ -81,7 +93,7 @@ def download_gae_sdk(runtime):
     if runtime == 'java':
         if exists(join(
             target_dir, 'lib', 'user',
-            'appengine-api-labs-%s.jar' % GAE_VERSION
+            'appengine-api-labs-%s.jar' % META['gae-version']
             )):
             return
     elif exists(version_file):
@@ -89,7 +101,7 @@ def download_gae_sdk(runtime):
         sdk_version = sdk_version_file.readline().split()
         sdk_version = sdk_version and sdk_version[-1] or ''
         sdk_version_file.close()
-        if sdk_version == '"%s"' % GAE_VERSION_NAME:
+        if sdk_version == '"%s"' % META['gae-version-name']:
             return
 
     start("Installing %s" % name)
@@ -102,7 +114,7 @@ def download_gae_sdk(runtime):
 
     try:
         req = urlopen(GAE_SDK_PATH_ROOT + filename)
-        sdk_file = StringIO(req.read())
+        sdk_file = validate_download(req, META['%s-sdk' % runtime])
     except Exception, err:
         error("Couldn't Download the %s: %r" % (name, err))
 
@@ -128,24 +140,36 @@ def download_gae_sdk(runtime):
 
     success("%s Successfully Installed." % name)
 
+def validate_download(req, checksum):
+    data = req.read()
+    if sha256(data).hexdigest() != checksum:
+        error("Mismatched checksum for downloaded file")
+    return StringIO(data)
+
 # ------------------------------------------------------------------------------
 # Core Tasks
 # ------------------------------------------------------------------------------
 
 @register
+def deploy():
+    """deploy a production build"""
+
+@register
 def install():
     """install the various dependencies"""
 
-    download_gae_sdk('java')
-    download_gae_sdk('python')
+    for runtime in ('java', 'python'):
+        download_gae_sdk(runtime)
+
+    pylib_path = join(SCRIPT_ROOT, 'app', 'lib')
+    # for pkg in PYLIB_PACKAGES:
+    #     install_distfile(pkg, PYLIB_PACKAGES[pkg], pylib_path)
 
 @register
-def run():
+def run(profile='dev'):
     """build and run a local instance"""
 
-@register
-def deploy():
-    """deploy a production build"""
+    start("Running servers under the %s profile" % profile)
 
 # -----------------------------------------------------------------------------
 # Script Runner
@@ -154,16 +178,42 @@ def deploy():
 if __name__ == '__main__':
     argv = argv[1:]
     if not argv or argv[0] in ('-h', '--help', 'help'):
-        spacing = max(len(cmd) for cmd in COMMANDS) + 5
+        out = []
         print "Usage: build [command]\n"
         print "Commands:\n"
         for cmd in sorted(COMMANDS):
-            pad = (spacing - len(cmd)) * ' '
-            print "\t%s%s%s" % (cmd, pad, COMMANDS[cmd].__doc__)
+            spec, func = COMMANDS[cmd]
+            if spec.args:
+                extra = "/%s" % '/'.join("<%s>" % arg for arg in spec.args)
+            else:
+                extra = ""
+            out.append(("%s%s" % (cmd, extra), func.__doc__))
+        max = 0
+        for name, _ in out:
+            spacing = len(name)
+            if spacing > max:
+                max = spacing
+        max += 5
+        for name, doc in out:
+            pad = (max - len(name)) * ' '
+            print "\t%s%s%s" % (name, pad, doc)
         print
         exit(0)
     for cmd in argv:
+        cmd = cmd.split('/', 1)[0]
         if cmd not in COMMANDS:
             error("Couldn't find the %s command" % cmd)
     for cmd in argv:
-        COMMANDS[cmd]()
+        split = cmd.split('/')
+        cmd = split.pop(0)
+        spec, func = COMMANDS[cmd]
+        args = filter(None, split)
+        slen = len(args)
+        req = len(spec.args)
+        if slen > req:
+            error("The %s command only takes %d arguments" % (cmd, req))
+        if spec.defaults:
+            req -= len(spec.defaults)
+        if slen < req:
+            error("The %s command requires at least %d arguments" % (cmd, req))
+        func(*args)
