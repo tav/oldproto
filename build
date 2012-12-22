@@ -9,7 +9,7 @@ from cStringIO import StringIO
 from hashlib import sha256
 from inspect import getargspec
 from os import mkdir
-from os.path import dirname, exists, join
+from os.path import dirname, exists, join, realpath
 from shutil import rmtree
 from sys import argv, exit, platform
 from urllib import urlopen
@@ -95,6 +95,7 @@ def download_gae_sdk(runtime):
             target_dir, 'lib', 'user',
             'appengine-api-labs-%s.jar' % META['gae-version']
             )):
+            success("%s is up-to-date." % name)
             return
     elif exists(version_file):
         sdk_version_file = open(version_file, 'rb')
@@ -102,6 +103,7 @@ def download_gae_sdk(runtime):
         sdk_version = sdk_version and sdk_version[-1] or ''
         sdk_version_file.close()
         if sdk_version == '"%s"' % META['gae-version-name']:
+            success("%s is up-to-date." % name)
             return
 
     start("Installing %s" % name)
@@ -140,6 +142,14 @@ def download_gae_sdk(runtime):
 
     success("%s Successfully Installed." % name)
 
+def install_dist():
+
+    dist_path = join(SCRIPT_ROOT, "dist")
+    if exists(dist_path):
+        if exists(join(dirname(realpath(dist_path)), ".git")):
+            success(u"A version controlled `dist` directory exists.")
+            return
+
 def validate_download(req, checksum):
     data = req.read()
     if sha256(data).hexdigest() != checksum:
@@ -161,9 +171,7 @@ def install():
     for runtime in ('java', 'python'):
         download_gae_sdk(runtime)
 
-    pylib_path = join(SCRIPT_ROOT, 'app', 'lib')
-    # for pkg in PYLIB_PACKAGES:
-    #     install_distfile(pkg, PYLIB_PACKAGES[pkg], pylib_path)
+    install_dist()
 
 @register
 def run(profile='dev'):
