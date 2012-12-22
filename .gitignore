@@ -4,6 +4,12 @@
 .appengine_java_sdk
 .appengine_python_sdk
 
+app/assets.json
+app/build
+dist
+etc
+private
+
 # hidden files/directories
 
 .bzr
