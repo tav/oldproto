@@ -6,7 +6,7 @@
 """Build script for Proto Espra."""
 
 from cStringIO import StringIO
-from hashlib import sha256
+from hashlib import sha1
 from inspect import getargspec
 from os import mkdir
 from os.path import dirname, exists, join, realpath
@@ -116,7 +116,11 @@ def download_gae_sdk(runtime):
 
     try:
         req = urlopen(GAE_SDK_PATH_ROOT + filename)
-        sdk_file = validate_download(req, META['%s-sdk' % runtime])
+        if runtime == 'go':
+            checksum = META['go-%s-sdk' % PLATFORM]
+        else:
+            checksum = META['%s-sdk' % runtime]
+        sdk_file = validate_download(req, checksum)
     except Exception, err:
         error("Couldn't Download the %s: %r" % (name, err))
 
@@ -147,12 +151,12 @@ def install_dist():
     dist_path = join(SCRIPT_ROOT, "dist")
     if exists(dist_path):
         if exists(join(dirname(realpath(dist_path)), ".git")):
-            success(u"A version controlled `dist` directory exists.")
+            success("A version controlled `dist` directory exists.")
             return
 
 def validate_download(req, checksum):
     data = req.read()
-    if sha256(data).hexdigest() != checksum:
+    if sha1(data).hexdigest() != checksum:
         error("Mismatched checksum for downloaded file")
     return StringIO(data)
 
@@ -168,7 +172,7 @@ def deploy():
 def install():
     """install the various dependencies"""
 
-    for runtime in ('java', 'python'):
+    for runtime in ('go', 'java', 'python'):
         download_gae_sdk(runtime)
 
     install_dist()
