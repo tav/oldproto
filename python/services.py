@@ -10,14 +10,13 @@ import sys
 from BaseHTTPServer import BaseHTTPRequestHandler
 from binascii import hexlify
 from cgi import FieldStorage
+from Cookie import SimpleCookie
 from cStringIO import StringIO
 from datetime import datetime
-from hashlib import sha1
 from json import dumps as json_encode, loads as json_decode
 from md5 import md5
 from os import urandom
-from os.path import dirname, exists, join as join_path, getmtime
-from threading import local
+from os.path import dirname
 from traceback import format_exception
 from urllib import quote as urlquote, unquote as urlunquote
 from urlparse import urljoin
@@ -30,22 +29,20 @@ from google.appengine.runtime.apiproxy_errors import CapabilityDisabledError
 sys.path.insert(0, dirname(__file__))
 sys.path.insert(0, 'lib')
 
-from cookie import SimpleCookie # note: this is our cookie and not Cookie...
-from exception import html_format_exception
-from mako.exceptions import RichTraceback
-from mako.template import Template as MakoTemplate
+from markupsafe import escape
 from tavutil.crypto import (
     create_tamper_proof_string, secure_string_comparison,
     validate_tamper_proof_string
     )
 
+from tavutil.exception import html_format_exception
 from tavutil.jsonp import is_valid_jsonp_callback_value
 
 from webob import Request as WebObRequest # this import patches cgi.FieldStorage
                                           # to behave better for us too!
 
 from config import (
-    DEBUG, SECURE_COOKIE_DURATION, SECURE_COOKIE_KEY, SKINS_ENABLED,
+    DEBUG, SECURE_COOKIE_DURATION, SECURE_COOKIE_KEY,
     STATIC_HTTP_HOSTS, STATIC_HTTPS_HOSTS, STATIC_PATH
     )
 
@@ -247,35 +244,6 @@ else:
         return cache.setdefault(path, "//%s%s%s" % (ctx.host, prefix, assets[path]))
 
 # ------------------------------------------------------------------------------
-# Memcache
-# ------------------------------------------------------------------------------
-
-# Generate cache key/info for the render service call.
-def cache_key_gen(ctx, cache_spec, name, *args, **kwargs):
-
-    user = ''
-    if cache_spec.get('user', True):
-        user = ctx.username
-        if (not cache_spec.get('anon', True)) and not user:
-            return
-
-    if cache_spec.get('ignore_args', False):
-        args = ()
-
-    if cache_spec.get('ignore_kwargs', False):
-        kwargs = {}
-
-    key = sha1(
-        "%r-%r-%r" % (user, args, sorted(kwargs.iteritems()))
-        ).hexdigest()
-
-    namespace = cache_spec.get('namespace', None)
-    if namespace is None:
-        namespace = name
-
-    return key, namespace, cache_spec.get('time', 20)
-
-# ------------------------------------------------------------------------------
 # Service Utilities
 # ------------------------------------------------------------------------------
 
@@ -289,16 +257,12 @@ SERVICE_DEFAULT_CONFIG = {
     'anon': True,
     'blob': False,
     'cache': False,
-    'cache_key': cache_key_gen,
-    'cache_spec': dict(namespace=None, time=10, player=True, anon=True),
     'post_encoding': False,
-    'skin': SKINS_ENABLED,
-    'ssl': SSL_ONLY,
     'xsrf': False
     }
 
-# The ``register_service`` decorator is used to turn a function into a service.
-def register_service(name, renderers, **config):
+# The ``service`` decorator is used to turn a function into a service.
+def service(name, renderers, **config):
     def __register_service(function):
         __config = SERVICE_DEFAULT_CONFIG.copy()
         __config.update(config)
@@ -334,18 +298,8 @@ def get_http_datetime(timestamp=None):
     return timestamp.strftime('%a, %d %B %Y %H:%M:%S GMT') # %m
 
 # ------------------------------------------------------------------------------
-# Null Skin
-# ------------------------------------------------------------------------------
-
-class NullSkin(object):
-    _ = {}.__getitem__
-
-# ------------------------------------------------------------------------------
 # Context
 # ------------------------------------------------------------------------------
-
-if SKINS_ENABLED:
-    from config import SKIN
 
 # The ``Context`` class encompasses the HTTP request/response. An instance,
 # specific to the current request, is passed in as the first parameter to all
@@ -365,14 +319,6 @@ class Context(object):
 
     _cookies_parsed = None
     _xsrf_token = None
-
-    if SKINS_ENABLED:
-        skin = SKIN
-    else:
-        skin = NullSkin()
-
-    skin_dir = None
-    skin_id = 'default'
 
     def __init__(self, service, environ, ssl_mode):
         self.service = service
@@ -556,14 +502,10 @@ class Context(object):
 # App Runner
 # ------------------------------------------------------------------------------
 
-reqlocal = local()
-
-def handle_http_request(
+def app(
     env, start_response, dict=dict, isinstance=isinstance, urlunquote=urlunquote,
     unicode=unicode, get_response_headers=lambda: None
     ):
-
-    reqlocal.template_error_traceback = None
 
     try:
 
@@ -596,7 +538,7 @@ def handle_http_request(
 
         routed = 0
         if service_name not in SERVICE_REGISTRY:
-            router = handle_http_request.router
+            router = app.router
             if router:
                 _service_info = router(env, _args)
                 if not _service_info:
@@ -713,9 +655,6 @@ def handle_http_request(
                 new_header((k, v))
             return str_headers
 
-        if config['skin']:
-            ctx.load_skin(ctx.get_cookie('skinhost', env['HTTP_HOST']), kwargs)
-
         if 'submit' in kwargs:
             del kwargs['submit']
 
@@ -747,14 +686,7 @@ def handle_http_request(
             raise AuthError("You need to be logged in.")
 
         if config['cache']:
-            cache_info = config['cache_key'](
-                ctx, config['cache_spec'], service_name, *args, **kwargs
-                )
-            if cache_info is not None:
-                cache_key, cache_namespace, cache_time = cache_info
-                output = memcache.get(cache_key, cache_namespace)
-                if output is not None:
-                    raise HTTPContent(output)
+            pass
 
         # Try and respond with the result of calling the service.
         if renderers and renderers[-1] == json:
@@ -793,11 +725,6 @@ def handle_http_request(
             content = ''
         elif isinstance(content, unicode):
             content = content.encode('utf-8')
-
-        if config['cache'] and cache_info is not None:
-            memcache.set(
-                cache_key, output, cache_time, namespace=cache_namespace
-                )
 
         raise HTTPContent(content)
 
@@ -850,253 +777,15 @@ def handle_http_request(
 
     # Log any errors and return an HTTP 500 response.
     except Exception, error:
-        template_tb = reqlocal.template_error_traceback
         logging.critical(''.join(format_exception(*sys.exc_info())))
         if DEBUG:
             traceback = ''.join(html_format_exception())
         else:
             traceback = escape("%s: %s" % (error.__class__.__name__, error))
-        if template_tb:
-            logging.critical(PlainErrorTemplate.render(traceback=template_tb))
-            if DEBUG:
-                traceback = HTMLErrorTemplate.render(traceback=template_tb)
         response = ERROR_500_TRACEBACK % traceback
         start_response(*RESPONSE_500)
         if isinstance(response, unicode):
             response = response.encode('utf-8')
         return [response]
 
-handle_http_request.router = None
-
-# ------------------------------------------------------------------------------
-# Template Error Handling
-# ------------------------------------------------------------------------------
-
-PlainErrorTemplate = MakoTemplate("""
-Traceback (most recent call last):
-% for (filename, lineno, function, line) in traceback.traceback:
-  File "${filename}", line ${lineno}, in ${function or '?'}
-    ${line | trim}
-% endfor
-${traceback.errorname}: ${traceback.message}
-""")
-
-HTMLErrorTemplate = MakoTemplate(r"""
-<style type="text/css">
-    .stacktrace { margin:5px 5px 5px 5px; }
-    .highlight { padding:0px 10px 0px 10px; background-color:#9F9FDF; }
-    .nonhighlight { padding:0px; background-color:#DFDFDF; }
-    .sample { padding:10px; margin:10px 10px 10px 10px; font-family:monospace; }
-    .sampleline { padding:0px 10px 0px 10px; }
-    .sourceline { margin:5px 5px 10px 5px; font-family:monospace;}
-    .location { font-size:80%; }
-</style>
-<%
-    src = traceback.source
-    line = traceback.lineno
-    if src:
-        lines = src.split('\n')
-    else:
-        lines = None
-%>
-<h3>${traceback.errorname}: ${traceback.message}</h3>
-
-% if lines:
-    <div class="sample">
-    <div class="nonhighlight">
-% for index in range(max(0, line-4),min(len(lines), line+5)):
-    % if index + 1 == line:
-<div class="highlight">${index + 1} ${lines[index] | h}</div>
-    % else:
-<div class="sampleline">${index + 1} ${lines[index] | h}</div>
-    % endif
-% endfor
-    </div>
-    </div>
-% endif
-
-<div class="stacktrace"><ul>
-% for (filename, lineno, function, line) in traceback.traceback:
-    <li>
-    <div class="location">${filename}, line ${lineno}:</div>
-    <div class="sourceline">${line | h}</div>
-    </li>
-% endfor
-</ul></div>
-""")
-
-def template_error_handler(context, error):
-    reqlocal.template_error_traceback = RichTraceback()
-
-handle_http_request.template_error_handler = template_error_handler
-
-# ------------------------------------------------------------------------------
-# Monkey Patches
-# ------------------------------------------------------------------------------
-
-# The ``mako`` templating system uses ``beaker`` to cache segments and this
-# needs various patches to make appropriate use of Memcache as a cache backend
-# on App Engine.
-#
-# First, the App Engine memcache client needs to be setup as the ``memcache``
-# module.
-import google.appengine.api.memcache as memcache
-
-sys.modules['memcache'] = memcache
-
-import beaker.container
-import beaker.ext.memcached
-
-# And then the beaker ``Value`` object itself needs to be patched.
-class Value(beaker.container.Value):
-
-    def get_value(self):
-        stored, expired, value = self._get_value()
-        if not self._is_expired(stored, expired):
-            return value
-
-        if not self.createfunc:
-            raise KeyError(self.key)
-
-        v = self.createfunc()
-        self.set_value(v)
-        return v
-
-beaker.container.Value = Value
-beaker.ext.memcached.verify_directory = lambda x: None
-
-# ------------------------------------------------------------------------------
-# Mako
-# ------------------------------------------------------------------------------
-
-def call_template_error_handler(*args, **kwargs):
-    return handle_http_request.template_error_handler(*args, **kwargs)
-
-# The ``mako`` templating system is used. It offers a reasonably flexible engine
-# with pretty decent performance.
-class MakoTemplateLookup(object):
-
-    default_template_args = {
-        'format_exceptions': False,
-        'error_handler': call_template_error_handler,
-        'disable_unicode': False,
-        'output_encoding': 'utf-8',
-        'encoding_errors': 'strict',
-        'input_encoding': 'utf-8',
-        'module_directory': None,
-        'cache_type': 'memcached',
-        'cache_dir': '.',
-        'cache_url': 'memcached://',
-        'cache_enabled': True,
-        'default_filters': ['decode.utf8'],  # will be shared across instances
-        'buffer_filters': [],
-        'imports': None,
-        'preprocessor': None
-        }
-
-    templates_directory = 'template'
-
-    def __init__(self, **kwargs):
-        self.template_args = self.default_template_args.copy()
-        self.template_args.update(kwargs)
-        self._template_cache = {}
-        self._template_mtime_data = {}
-
-    if DEBUG:
-
-        def get_template(self, uri, kwargs=None):
-
-            filepath = join_path(self.templates_directory, uri + '.mako')
-            if not exists(filepath):
-                raise IOError("Cannot find template %s.mako" % uri)
-
-            template_time = getmtime(filepath)
-
-            if ((template_time <= self._template_mtime_data.get(uri, 0)) and
-                ((uri, kwargs) in self._template_cache)):
-                return self._template_cache[(uri, kwargs)]
-
-            if kwargs:
-                _template_args = self.template_args.copy()
-                _template_args.update(dict(kwargs))
-            else:
-                _template_args = self.template_args
-
-            template = MakoTemplate(
-                uri=uri, filename=filepath, lookup=self, **_template_args
-                )
-
-            self._template_cache[(uri, kwargs)] = template
-            self._template_mtime_data[uri] = template_time
-
-            return template
-
-    else:
-
-        def get_template(self, uri, kwargs=None):
-
-            if (uri, kwargs) in self._template_cache:
-                return self._template_cache[(uri, kwargs)]
-
-            filepath = join_path(self.templates_directory, uri + '.mako')
-            if not exists(filepath):
-                raise IOError("Cannot find template %s.mako" % uri)
-
-            if kwargs:
-                _template_args = self.template_args.copy()
-                _template_args.update(dict(kwargs))
-            else:
-                _template_args = self.template_args
-
-            template = MakoTemplate(
-                uri=uri, filename=filepath, lookup=self, **_template_args
-                )
-
-            return self._template_cache.setdefault((uri, kwargs), template)
-
-    def adjust_uri(self, uri, relativeto):
-        return uri
-
-def get_mako_template(ctx, uri, kwargs=None, lookup=MakoTemplateLookup().get_template):
-    skin_dir = ctx.skin_dir
-    if skin_dir:
-        tmpl = None
-        for path in [skin_dir + '/' + uri, uri]:
-            try:
-                tmpl = lookup(path, kwargs)
-                break
-            except IOError, err:
-                continue
-        if tmpl:
-            return tmpl
-        raise err
-    else:
-        return lookup(uri, kwargs)
-
-def call_mako_template(ctx, template, **kwargs):
-    return template.render_unicode(
-        ctx=ctx, _=ctx.skin._, STATIC=ctx.STATIC, **kwargs
-        )
-
-def render_mako_template(ctx, template_name, **kwargs):
-    return ctx.get_mako_template(template_name).render_unicode(
-        ctx=ctx, _=ctx.skin._, STATIC=ctx.STATIC, **kwargs
-        )
-
-Context.get_mako_template = get_mako_template
-Context.call_mako_template = call_mako_template
-Context.render_mako_template = render_mako_template
-
-# ------------------------------------------------------------------------------
-# HTML Escape
-# ------------------------------------------------------------------------------
-
-def escape(s):
-    return s.replace(u"&", u"&amp;").replace(u"<", u"&lt;").replace(
-        u">", u"&gt;").replace(u'"', u"&quot;")
-
-# ------------------------------------------------------------------------------
-# WSGI App Alias
-# ------------------------------------------------------------------------------
-
-app = handle_http_request
+app.router = None
