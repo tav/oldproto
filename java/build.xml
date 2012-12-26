@@ -1,0 +1,79 @@
+<project name="espra" default="war">
+
+  <property name="appengine.sdk" location="../.appengine_java_sdk"/>
+
+  <fail message="Please run `./build install` in the project root.">
+    <condition>
+      <not> <and>
+          <isset property="appengine.sdk"/>
+          <available file="${appengine.sdk}/config/user/ant-macros.xml"/>
+      </and> </not>
+    </condition>
+  </fail>
+
+  <import file="${appengine.sdk}/config/user/ant-macros.xml"/>
+
+  <property name="http.port" value="8081"/>
+  <property name="war.dir" location="war"/>
+
+  <target name="war" depends="enhance"
+          description="Assemble the application directory">
+    <copy todir="${war.dir}">
+      <fileset dir="html">
+        <exclude name="**/*~"/>
+      </fileset>
+    </copy>
+    <mkdir dir="${war.dir}/WEB-INF"/>
+    <copy file="../etc/java/appengine.xml" tofile="${war.dir}/WEB-INF/appengine-web.xml" />
+    <copy file="web.xml" todir="${war.dir}/WEB-INF" />
+    <mkdir dir="${war.dir}/WEB-INF/lib"/>
+    <copy todir="${war.dir}/WEB-INF/lib">
+      <fileset dir="../dist/jars">
+        <include name="*.jar"/>
+      </fileset>
+    </copy>
+    <enhance_war war="${war.dir}"/>
+  </target>
+
+  <target name="enhance" depends="compile"
+          description="Enhance the classes after compilation">
+    <enhance_war war="${war.dir}" />
+  </target>
+
+  <target name="compile"
+          description="Compile the application servlet code">
+    <mkdir dir="${war.dir}/WEB-INF/classes"/>
+    <mkdir dir="${war.dir}/WEB-INF/lib"/>
+    <javac srcdir="src" destdir="${war.dir}/WEB-INF/classes" includeantruntime="false">
+      <compilerarg value="-Xlint:deprecation"/>
+      <classpath>
+        <fileset dir="../dist/jars">
+          <include name="*.jar"/>
+        </fileset>
+        <fileset dir="${appengine.sdk}/lib/user">
+          <include name="*.jar"/>
+        </fileset>
+        <fileset dir="${appengine.sdk}/lib/shared">
+          <include name="*.jar"/>
+        </fileset>
+      </classpath>
+    </javac>
+    <copy file="../dist/coffee-script.js" todir="${war.dir}/WEB-INF/classes/espra" />
+  </target>
+
+  <target name="clean"
+          description="Force a clean slate to rebuild">
+    <delete dir="${war.dir}"/>
+  </target>
+
+  <target name="runserver" depends="war"
+          description="Run the dev_appserver">
+    <dev_appserver war="${war.dir}" port="${http.port}"/>
+  </target>
+
+  <target name="update" depends="war"
+          description="Uploads the application, including indexes">
+    <appcfg action="update" war="${war.dir}"/>
+  </target>
+
+</project>

@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<web-app
+   xmlns="http://java.sun.com/xml/ns/javaee"
+   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+   xsi:schemaLocation="http://java.sun.com/xml/ns/javaee http://java.sun.com/xml/ns/javaee/web-app_2_5.xsd"
+   version="2.5">
+
+  <display-name>Java API Endpoint</display-name>
+  <welcome-file-list>
+    <welcome-file>index.html</welcome-file>
+    <welcome-file>cajoleit.html</welcome-file>
+  </welcome-file-list>
+
+  <servlet>
+    <servlet-name>cajoleit</servlet-name>
+    <servlet-class>espra.CajoleitServlet</servlet-class>
+  </servlet>
+
+  <servlet>
+    <servlet-name>extractor</servlet-name>
+    <servlet-class>espra.ExtractorServlet</servlet-class>
+  </servlet>
+
+  <servlet-mapping>
+    <servlet-name>cajoleit</servlet-name>
+    <url-pattern>/cajole</url-pattern>
+  </servlet-mapping>
+
+  <servlet-mapping>
+    <servlet-name>extractor</servlet-name>
+    <url-pattern>/extract</url-pattern>
+  </servlet-mapping>
+
+  <security-constraint>
+    <web-resource-collection>
+      <url-pattern>/*</url-pattern>
+    </web-resource-collection>
+    <user-data-constraint>
+      <transport-guarantee>CONFIDENTIAL</transport-guarantee>
+    </user-data-constraint>
+  </security-constraint>
+
+</web-app>
