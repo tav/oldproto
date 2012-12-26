@@ -8,7 +8,7 @@
 from cStringIO import StringIO
 from hashlib import sha1
 from inspect import getargspec
-from os import mkdir
+from os import chmod, mkdir
 from os.path import dirname, exists, join, realpath
 from shutil import rmtree
 from sys import argv, exit, platform
@@ -138,9 +138,13 @@ def download_gae_sdk(runtime):
             if iname.endswith('/'):
                 mkdir(join(target_dir, newname))
             else:
-                newfile = open(join(target_dir, newname), 'wb')
+                target_path = join(target_dir, newname)
+                newfile = open(target_path, 'wb')
                 newfile.write(sdk_zip.read(iname))
                 newfile.close()
+                info = sdk_zip.getinfo(iname)
+                if info.external_attr:
+                    chmod(target_path, info.external_attr >> 16)
     except Exception, err:
         error("Couldn't Extract the %s: %r" % (name, err))
 
