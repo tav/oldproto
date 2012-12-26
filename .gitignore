@@ -6,8 +6,13 @@
 
 app/assets.json
 app/build
+blobnode/blobnode
+coffee/*.js
 dist
 etc
+java/war
+live-server/live-server
+matchdb/matchdb
 private
 
 # hidden files/directories
