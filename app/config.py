@@ -1,1 +1,0 @@
-../etc/app/config.py
