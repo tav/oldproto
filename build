@@ -12,9 +12,12 @@ from os import chmod, mkdir
 from os.path import dirname, exists, join, realpath
 from shutil import rmtree
 from sys import argv, exit, platform
+from time import sleep
 from urllib import urlopen
 from zipfile import ZipFile
 
+from plumbum import FG, local
+from plumbum.cmd import ant, assetgen
 from yaml import load as parse_yaml
 
 # ------------------------------------------------------------------------------
@@ -80,6 +83,13 @@ def register(func):
     COMMANDS[func.__name__.replace('_', '-')] = (getargspec(func), func)
 
 # ------------------------------------------------------------------------------
+# Utility Functions
+# ------------------------------------------------------------------------------
+
+def get_path(*path):
+    return join(SCRIPT_ROOT, *path)
+
+# ------------------------------------------------------------------------------
 # Download Handlers
 # ------------------------------------------------------------------------------
 
@@ -87,7 +97,7 @@ def download_gae_sdk(runtime):
 
     name = "%s App Engine SDK" % runtime.title()
     filename = GAE_SDK_FILES[runtime]
-    target_dir = join(SCRIPT_ROOT, '.appengine_%s_sdk' % runtime)
+    target_dir = get_path('.appengine_%s_sdk' % runtime)
     version_file = join(target_dir, 'VERSION')
 
     if runtime == 'java':
@@ -152,7 +162,7 @@ def download_gae_sdk(runtime):
 
 def install_dist():
 
-    dist_path = join(SCRIPT_ROOT, "dist")
+    dist_path = get_path("dist")
     if exists(dist_path):
         if exists(join(dirname(realpath(dist_path)), ".git")):
             success("A version controlled `dist` directory exists.")
@@ -165,12 +175,62 @@ def validate_download(req, checksum):
     return StringIO(data)
 
 # ------------------------------------------------------------------------------
+# Build
+# ------------------------------------------------------------------------------
+
+def build():
+    pass
+
+# ------------------------------------------------------------------------------
 # Core Tasks
 # ------------------------------------------------------------------------------
 
 @register
-def deploy():
+def app(profile='dev', watch=False):
+    """build the app files"""
+
+    start("Building app files")
+
+    conf_path = get_path("etc", "app", "config.yaml")
+
+    try:
+        while 1:
+            conf = get_yaml_conf(conf_path)
+            if not watch:
+                break
+            sleep(1)
+    except KeyboardInterrupt:
+        exit(0)
+
+    success("App files successfully built")
+
+@register
+def deploy(app):
     """deploy a production build"""
+
+    start("Deploying %s" % app)
+
+    if app == 'all':
+        all = 1
+    else:
+        all = 0
+
+    if all or app == 'python':
+        progress("Deploying the Python app")
+        appcfg = local[get_path(".appengine_python_sdk", "appcfg.py")]
+        with local.cwd(get_path("python")):
+            appcfg["update", "."] & FG
+
+    if all or app == 'java':
+        progress("Building the Java app")
+        with local.cwd(get_path("java")):
+            ant["war"] & FG
+        progress("Deploying the Java app")
+        appcfg = local[get_path(".appengine_java_sdk", "bin", "appcfg.sh")]
+        with local.cwd(get_path("java")):
+            appcfg["update", "war"] & FG
+
+    success("Finished deploying %s" % app)
 
 @register
 def install():
