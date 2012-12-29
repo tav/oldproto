@@ -5,11 +5,12 @@
 .appengine_python_sdk
 
 app/build
+app/espra/html.go
 assets.json
-bg.json
 blob-node/log
 blob-node/blob-node
 blob-node/run
+blob-node/serve/bg.json
 coffee/*.js
 dist
 etc
