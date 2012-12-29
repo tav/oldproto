@@ -4,15 +4,22 @@
 .appengine_java_sdk
 .appengine_python_sdk
 
-app/assets.json
 app/build
-blobnode/blobnode
+assets.json
+bg.json
+blob-node/log
+blob-node/blob-node
+blob-node/run
 coffee/*.js
 dist
 etc
 java/war
 live-server/live-server
+live-server/log
+live-server/run
+matchdb/log
 matchdb/matchdb
+matchdb/run
 private
 
 # hidden files/directories
