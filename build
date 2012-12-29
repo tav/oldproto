@@ -8,8 +8,9 @@
 from cStringIO import StringIO
 from hashlib import sha1
 from inspect import getargspec
-from os import chmod, mkdir
-from os.path import dirname, exists, join, realpath
+from json import loads as decode_json
+from os import chmod, listdir, mkdir, remove, stat
+from os.path import dirname, exists, join, realpath, splitext
 from shutil import rmtree
 from sys import argv, exit, platform
 from time import sleep
@@ -18,7 +19,7 @@ from zipfile import ZipFile
 
 from plumbum import FG, local
 from plumbum.cmd import ant, assetgen
-from yaml import load as parse_yaml
+from yaml import load as load_yaml
 
 # ------------------------------------------------------------------------------
 # Print Utilities
@@ -49,14 +50,20 @@ else:
     error("The %r operating system isn't currently supported" % platform)
 
 # ------------------------------------------------------------------------------
-# YAML Config Handling
+# File Handling
 # ------------------------------------------------------------------------------
 
 def get_yaml_conf(filename):
     f = open(join(dirname(__file__), filename), 'rb')
-    conf = parse_yaml(f)
+    conf = load_yaml(f)
     f.close()
     return conf
+
+def read(filename):
+    f = open(filename, 'rb')
+    data = f.read()
+    f.close()
+    return data
 
 # ------------------------------------------------------------------------------
 # Global Constants
@@ -178,26 +185,129 @@ def validate_download(req, checksum):
 # Build
 # ------------------------------------------------------------------------------
 
-def build():
+class BuildInfo(object):
     pass
+
+def build(info, raise_exit):
+
+    progress("Running assetgen")
+    if info.profile:
+        with local.cwd(SCRIPT_ROOT):
+            assetgen["assetgen.yaml", "--profile", info.profile] & FG
+    else:
+        with local.cwd(SCRIPT_ROOT):
+            assetgen["assetgen.yaml"] & FG
+
+    build_dir = info.build_dir
+    cache = info.cache
+    changed = 0
+    template_dir = info.template_dir
+    templates = info.templates
+
+    filepath = info.assets_path
+    statinfo = stat(filepath)
+    if (filepath not in cache) or (cache[filepath][0] < statinfo.st_mtime):
+        changed = 1
+        contents = read(filepath)
+        cache[filepath] = (statinfo.st_mtime, contents)
+        assets = dict(
+            (str(k), str(v)) for k, v in decode_json(contents).iteritems()
+            )
+        info.assets = assets
+        info.init_css = read(join(build_dir, assets['init.css']))
+        info.init_js = read(join(build_dir, assets['init.js']))
+
+    filepath = info.config_path
+    statinfo = stat(filepath)
+    if (filepath not in cache) or (cache[filepath][0] < statinfo.st_mtime):
+        changed = 1
+        info.config = get_yaml_conf(filepath)
+        cache[filepath] = (statinfo.st_mtime, None)
+
+    for filename in listdir(template_dir):
+        if filename.startswith('.'):
+            continue
+        filepath = join(template_dir, filename)
+        statinfo = stat(filepath)
+        if (filepath not in cache) or (cache[filepath][0] < statinfo.st_mtime):
+            changed = 1
+            contents = read(filepath)
+            cache[filename] = (statinfo.st_mtime, contents)
+            templates[splitext(filename)[0]] = contents
+
+    if not changed:
+        return
+
+    changed = 0
+    html_mtime = info.html_mtime
+    if not html_mtime:
+        changed = 1
+    else:
+        for value in cache.itervalues():
+            if value[0] > html_mtime:
+                changed = 1
+
+    if not changed:
+        return
+
+    data = info.config.copy()
+    data['assets'] = info.assets
+    data['init.css'] = info.init_css
+    data['init.js'] = info.init_js
+
+    progress("Generating templates")
+
+    output = [
+        '// DO NOT EDIT.\n',
+        '// Auto-generated templates file.\n\n',
+        'package espra\n\n',
+        ]
+    out = output.append
+
+    for tmpl in sorted(templates):
+        contents = data['template/' + tmpl] = templates[tmpl] % data
+        if tmpl.startswith('_'):
+            continue
+        out("var html%sStr = `%s`\n\n" % (tmpl.title(), contents))
+
+    progress("Generating html.go")
+
+    output[-1] = output[-1][:-1]
+    f = open(info.html_path, 'wb')
+    f.write(''.join(output))
+    f.close()
 
 # ------------------------------------------------------------------------------
 # Core Tasks
 # ------------------------------------------------------------------------------
 
 @register
-def app(profile='dev', watch=False):
+def app(profile='', watch=False):
     """build the app files"""
 
     start("Building app files")
 
-    conf_path = get_path("etc", "app", "config.yaml")
+    info = BuildInfo()
+    info.assets_path = get_path("assets.json")
+    info.build_dir = get_path("app", "build")
+    info.cache = {}
+    info.config_path = get_path("etc", "app", "config.yaml")
+    info.html_path = html_path = get_path("app", "espra", "html.go")
+    info.profile = profile
+    info.template_dir = get_path("etc", "template")
+    info.templates = {}
+
+    if exists(html_path):
+        info.html_mtime = stat(html_path).st_mtime
+    else:
+        info.html_mtime = 0
 
     try:
         while 1:
-            conf = get_yaml_conf(conf_path)
+            build(info, not watch)
             if not watch:
                 break
+            start("Sleeping ...")
             sleep(1)
     except KeyboardInterrupt:
         exit(0)
@@ -205,15 +315,31 @@ def app(profile='dev', watch=False):
     success("App files successfully built")
 
 @register
+def clean():
+    """remove built app files"""
+
+    start("Removing built app files")
+
+    html_path = get_path("app", "espra", "html.go")
+    if exists(html_path):
+        progress("Removing html.go")
+        remove(html_path)
+
+    with local.cwd(SCRIPT_ROOT):
+        progress("Running assetgen --clean")
+        assetgen["assetgen.yaml", "--clean"] & FG
+
+    success("Built files successfully removed")
+
+@register
 def deploy(app):
     """deploy a production build"""
 
     start("Deploying %s" % app)
 
+    all = 0
     if app == 'all':
         all = 1
-    else:
-        all = 0
 
     if all or app == 'python':
         progress("Deploying the Python app")
@@ -280,10 +406,9 @@ if __name__ == '__main__':
         if cmd not in COMMANDS:
             error("Couldn't find the %s command" % cmd)
     for cmd in argv:
-        split = cmd.split('/')
-        cmd = split.pop(0)
+        args = cmd.split('/')
+        cmd = args.pop(0)
         spec, func = COMMANDS[cmd]
-        args = filter(None, split)
         slen = len(args)
         req = len(spec.args)
         if slen > req:
