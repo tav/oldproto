@@ -1,0 +1,45 @@
+# Public Domain (-) 2011-2012 The Espra Authors.
+# See the Espra UNLICENSE file for details.
+
+generate:
+
+- client.js:
+    source:
+      - raw: |
+          // Public Domain (-) 2011-2012 The Espra Authors.
+          // See the Espra UNLICENSE file for details.
+      - https://raw.github.com/tav/jsutil/master/define.coffee
+      - https://raw.github.com/tav/jsutil/master/ucd.js
+      - coffee/client.coffee
+
+- init.css:
+    source:
+      - sass/init.sass
+
+- init.js:
+    source:
+      - coffee/init.coffee
+    compress: true
+
+- site.css:
+    source:
+      - raw: |
+          /* Public Domain (-) 2011-2012 The Espra Authors.
+           * See the Espra UNLICENSE file for details. */
+      - sass/site.sass
+
+- update.css:
+    source:
+      - raw: |
+          /* Public Domain (-) 2011-2012 The Espra Authors.
+           * See the Espra UNLICENSE file for details. */
+      - sass/update.sass
+
+output.directory: app/build
+output.hashed: true
+output.manifest: assets.json
+
+profile.dev:
+  css.compress: false
+  js.compress: false
+  output.hashed: false
