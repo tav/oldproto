@@ -12,7 +12,7 @@ from json import loads as decode_json
 from os import chmod, listdir, mkdir, remove, stat
 from os.path import dirname, exists, join, realpath, splitext
 from shutil import rmtree
-from sys import argv, exit, platform
+from sys import argv, exit, platform, stdout
 from time import sleep
 from urllib import urlopen
 from zipfile import ZipFile
@@ -188,7 +188,7 @@ def validate_download(req, checksum):
 class BuildInfo(object):
     pass
 
-def build(info, raise_exit):
+def build(info):
 
     progress("Running assetgen")
     if info.profile:
@@ -302,14 +302,22 @@ def app(profile='', watch=False):
     else:
         info.html_mtime = 0
 
+    if watch:
+        try:
+            watch = float(watch)
+        except Exception:
+            watch = 1.0
+
     try:
         while 1:
-            build(info, not watch)
+            build(info)
             if not watch:
                 break
             start("Sleeping ...")
-            sleep(1)
+            sleep(watch)
     except KeyboardInterrupt:
+        stdout.write('\b\b')
+        stdout.flush()
         exit(0)
 
     success("App files successfully built")
