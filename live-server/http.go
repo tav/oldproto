@@ -184,8 +184,8 @@ func serve503(w http.ResponseWriter, r *http.Request) {
 	logRequest(HTTP_MAINTENANCE, http.StatusServiceUnavailable, r)
 }
 
-func setupPong(id string) {
-	id += `");`
-	pongResponse = append(pongResponse, id...)
+func setupPong(typ, id string) {
+	typ += `", "` + id + `");`
+	pongResponse = append(pongResponse, typ...)
 	pongLength = fmt.Sprintf("%d", len(pongResponse))
 }
