@@ -6,36 +6,32 @@ package main
 import (
 	"bufio"
 	"bytes"
-	"github.com/garyburd/go-websocket/websocket"
-	// "compress/gzip"
-	// "crypto/tls"
 	"crypto/subtle"
-	// "encoding/json"
 	"encoding/gob"
 	"fmt"
 	"github.com/tav/golly/log"
 	"github.com/tav/golly/optparse"
 	"github.com/tav/golly/runtime"
 	"github.com/tav/golly/tlsconf"
-	"io"
-	// "io/ioutil"
-	// "net"
+	"github.com/tav/golly/websocket"
+	"io/ioutil"
 	"net/http"
 	"os"
 	"strconv"
-	"time"
-	// "strings"
 	"sync"
+	"time"
 )
 
 const (
 	logPrefix      = "ls"
 	maxPublishSize = 1 << 22
 	nodeIDLength   = 32
+	pingInterval   = 30 * time.Second
 )
 
 var (
 	debugMode = false
+	pingData  = []byte("LIVE")
 	respOK    = []byte("OK")
 )
 
@@ -53,6 +49,7 @@ type LiveServer struct {
 	upstreamHost     string
 	upstreamPort     int
 	upstreamTLS      bool
+	websocketOrigin  string
 }
 
 type Item struct {
@@ -97,29 +94,69 @@ func (s *LiveServer) HandlePublish(w http.ResponseWriter, r *http.Request) {
 	return
 }
 
-func (s *LiveServer) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
-	fmt.Println("BOOM")
-	conn, err := websocket.Upgrade(w, r.Header, "", 1024, 1024)
-	if err != nil {
-		log.StandardError(err)
-		serve400(w, r)
-		return
-	}
-	defer conn.Close()
+func readWebSocket(conn *websocket.Conn, reads chan []byte, quit chan bool) {
 	for {
 		op, r, err := conn.NextReader()
 		if err != nil {
+			quit <- true
 			return
 		}
 		if op != websocket.OpBinary && op != websocket.OpText {
 			continue
 		}
-		w, err := conn.NextWriter(op)
+		data, err := ioutil.ReadAll(r)
 		if err != nil {
+			quit <- true
 			return
 		}
-		io.Copy(w, r)
-		w.Close()
+		reads <- data
+	}
+}
+
+func (s *LiveServer) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
+	conn, err, closed := websocket.Upgrade(w, r, s.websocketOrigin, "")
+	if err != nil {
+		log.StandardError(err)
+		if !closed {
+			serve400(w, r)
+		}
+		return
+	}
+	conn.SetReadMaxSize(1 << 20)
+	reads := make(chan []byte, 1)
+	quit := make(chan bool, 1)
+	writes := make(chan []byte, 1)
+	tick := time.NewTicker(pingInterval)
+	go readWebSocket(conn, reads, quit)
+	defer func() {
+		tick.Stop()
+		conn.Close()
+	}()
+	for {
+		select {
+		case <-tick.C:
+			err = conn.WriteControl(websocket.OpPing, pingData, time.Now().Add(pingInterval))
+			if err != nil {
+				log.Error("websocket: failed on ping: %s", err)
+				return
+			}
+		case read := <-reads:
+			writes <- read
+		case write := <-writes:
+			w, err := conn.NextWriter(websocket.OpText)
+			if err != nil {
+				log.Error("websocket: failed on NextWriter: %s", err)
+				return
+			}
+			n, err := w.Write(write)
+			w.Close()
+			if n != len(write) || err != nil {
+				log.Error("websocket: failed on write: %s", err)
+				return
+			}
+		case <-quit:
+			return
+		}
 	}
 }
 
@@ -251,6 +288,9 @@ func main() {
 	upstreamTLS := opts.BoolConfig("upstream-tls", false,
 		"use TLS when connecting to upstream [false]")
 
+	websocketOrigin := opts.StringConfig("websocket-origin", "",
+		"limit websocket calls to the given origin if specified")
+
 	maintenanceMode := opts.BoolConfig("maintenance", false,
 		"start up in maintenance mode [false]")
 
@@ -269,7 +309,7 @@ func main() {
 	}
 
 	// Initialise ping/pong variables.
-	setupPong(*awsRegion)
+	setupPong("live-server", *awsRegion)
 
 	// Ensure required config values.
 	if *publishKey == "" {
@@ -283,6 +323,7 @@ func main() {
 		upstreamHost:     *upstreamHost,
 		upstreamPort:     *upstreamPort,
 		upstreamTLS:      *upstreamTLS,
+		websocketOrigin:  *websocketOrigin,
 	}
 
 	if *hstsMaxAge != 0 {
