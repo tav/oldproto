@@ -88,13 +88,51 @@ func (s *RedirectServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	logRequest(HTTP_REDIRECT, http.StatusMovedPermanently, r)
 }
 
+func isGlobalIP(ip net.IP) bool {
+	if ip == nil {
+		return false
+	}
+	if !ip.IsGlobalUnicast() {
+		return false
+	}
+	if ip4 := ip.To4(); ip4 != nil {
+		if ip4[0] == 10 {
+			return false
+		}
+		if ip4[0] == 192 && ip4[1] == 168 {
+			return false
+		}
+		if ip4[0] == 172 && ip4[1] >= 16 && ip4[1] <= 31 {
+			return false
+		}
+	}
+	// TODO(tav): Exclude unique local addresses within the block fc00::/7 for
+	// IPv6 addresses.
+	return true
+}
+
 func logRequest(proto, status int, r *http.Request) {
 	var ip string
-	splitPoint := strings.LastIndex(r.RemoteAddr, ":")
-	if splitPoint == -1 {
-		ip = r.RemoteAddr
+	if behindProxy {
+		if xfwd := r.Header.Get("X-Forwarded-For"); xfwd != "" {
+			if strings.Contains(xfwd, ",") {
+				for _, addr := range strings.Split(xfwd, ",") {
+					if p := net.ParseIP(strings.TrimSpace(addr)); isGlobalIP(p) {
+						ip = p.String()
+						break
+					}
+				}
+			} else if p := net.ParseIP(xfwd); isGlobalIP(p) {
+				ip = p.String()
+			}
+		}
 	} else {
-		ip = r.RemoteAddr[0:splitPoint]
+		splitPoint := strings.LastIndex(r.RemoteAddr, ":")
+		if splitPoint == -1 {
+			ip = r.RemoteAddr
+		} else {
+			ip = r.RemoteAddr[0:splitPoint]
+		}
 	}
 	log.InfoData(logPrefix, proto, status, r.Method, r.Host, r.URL,
 		ip, r.UserAgent(), r.Referer())
