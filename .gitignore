@@ -7,6 +7,7 @@
 app/build
 app/espra/html.go
 assets.json
+blob-node/*.yaml
 blob-node/log
 blob-node/blob-node
 blob-node/run
@@ -15,9 +16,11 @@ coffee/*.js
 dist
 etc
 java/war
+live-server/*.yaml
 live-server/live-server
 live-server/log
 live-server/run
+matchdb/*.yaml
 matchdb/log
 matchdb/matchdb
 matchdb/run
