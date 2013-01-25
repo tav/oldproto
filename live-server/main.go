@@ -30,30 +30,47 @@ const (
 )
 
 var (
-	debugMode = false
-	pingData  = []byte("LIVE")
-	respOK    = []byte("OK")
+	pingData = []byte("LIVE")
+	respOK   = []byte("OK")
 )
 
+var powerOfTwos = [...]time.Duration{1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024}
+
+type Item struct {
+	ID string
+}
+
 type LiveServer struct {
-	hsts             string
 	hstsEnabled      bool
+	hstsHeader       string
 	httpClient       *http.Client
 	inMaintenance    bool
-	mutex            sync.RWMutex
+	maintLock        sync.RWMutex
 	publishAck       []byte
 	publishAckURL    string
 	publishKey       []byte
 	publishKeyLength int
-	upstreamAddr     string
-	upstreamHost     string
-	upstreamPort     int
-	upstreamTLS      bool
 	websocketOrigin  string
 }
 
-type Item struct {
-	ID string
+func (s *LiveServer) AckPublish(id string, tries int) {
+	resp, err := s.httpClient.Post(s.publishAckURL+id, "text/plain", bytes.NewBuffer(s.publishAck))
+	var tryAgain bool
+	if err == nil {
+		resp.Body.Close()
+		if resp.StatusCode != 200 {
+			tryAgain = true
+		}
+	} else {
+		tryAgain = true
+	}
+	if tryAgain {
+		if tries == 10 {
+			return
+		}
+		time.Sleep(powerOfTwos[tries] * 100 * time.Millisecond)
+		s.AckPublish(id, tries+1)
+	}
 }
 
 func (s *LiveServer) HandlePublish(w http.ResponseWriter, r *http.Request) {
@@ -122,6 +139,7 @@ func (s *LiveServer) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	logRequest(HTTP_WEBSOCKET, http.StatusOK, r)
 	conn.SetReadMaxSize(1 << 20)
 	reads := make(chan []byte, 1)
 	quit := make(chan bool, 1)
@@ -160,21 +178,8 @@ func (s *LiveServer) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *LiveServer) AckPublish(id string, tries time.Duration) {
-	resp, err := s.httpClient.Post(s.publishAckURL+id, "text/plain", bytes.NewBuffer(s.publishAck))
-	if err != nil {
-		time.Sleep(tries * 100 * time.Millisecond)
-		if tries == 10 {
-			return
-		}
-		s.AckPublish(id, tries+1)
-		return
-	}
-	resp.Body.Close()
-}
-
 func (s *LiveServer) Publish(item *Item) {
-	s.AckPublish(item.ID, 1)
+	s.AckPublish(item.ID, 0)
 }
 
 func (s *LiveServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -182,17 +187,17 @@ func (s *LiveServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Set default headers.
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	if s.hstsEnabled {
-		w.Header().Set("Strict-Transport-Security", s.hsts)
+		w.Header().Set("Strict-Transport-Security", s.hstsHeader)
 	}
 
 	// Return the HTTP 503 error page if we're in maintenance mode.
-	s.mutex.RLock()
+	s.maintLock.RLock()
 	if s.inMaintenance {
-		s.mutex.RUnlock()
+		s.maintLock.RUnlock()
 		serve503(w, r)
 		return
 	}
-	s.mutex.RUnlock()
+	s.maintLock.RUnlock()
 
 	switch r.URL.Path {
 	case "/":
@@ -210,24 +215,28 @@ func (s *LiveServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *LiveServer) SetMaintenance(status bool) {
-	s.mutex.Lock()
+	s.maintLock.Lock()
 	s.inMaintenance = status
-	s.mutex.Unlock()
+	s.maintLock.Unlock()
 }
 
-func setAckInfo(id int, s *LiveServer) {
+func setUpstreamInfo(s *LiveServer, host string, port int, useTLS bool, id int) {
 	if id == 0 {
 		runtime.Error("The publish-cluster-id cannot be 0")
 	}
 	if (id & (id - 1)) != 0 {
 		runtime.Error("The publish-cluster-id is not a power of 2")
 	}
-	s.publishAck = []byte(fmt.Sprintf("%s,%d,%d", string(s.publishKey), id, id))
-	if s.upstreamTLS && s.upstreamPort == 443 {
-		s.publishAckURL = fmt.Sprintf("https://%s/_ack_publish/", s.upstreamHost)
+	var baseURL string
+	if useTLS && port == 443 {
+		baseURL = fmt.Sprintf("https://%s/", host)
+	} else if useTLS {
+		baseURL = fmt.Sprintf("https://%s:%d/", host, port)
 	} else {
-		s.publishAckURL = fmt.Sprintf("https://%s/_ack_publish/", s.upstreamAddr)
+		baseURL = fmt.Sprintf("http://%s:%d/", host, port)
 	}
+	s.publishAck = []byte(fmt.Sprintf("%s,%d,%d", string(s.publishKey), id, id))
+	s.publishAckURL = baseURL + "ack_publish"
 }
 
 func main() {
@@ -255,23 +264,32 @@ func main() {
 	hstsMaxAge := opts.IntConfig("hsts-max-age", 31536000,
 		"max-age value of HSTS in number of seconds [0 (disabled)]")
 
-	// awsAccessKey := opts.StringConfig("aws-access-key", "",
-	// 	"the AWS Access Key for DynamoDB")
+	clusterID := opts.StringConfig("cluster-id", "",
+		"the cluster id to use when responding to ping requests")
 
-	// awsSecretKey := opts.StringConfig("aws-secret-key", "",
-	// 	"the AWS Secret Key for DynamoDB")
+	matchdbServer := opts.StringConfig("matchdb-server", "",
+		"the address for a single-node MatchDB server setup")
+
+	hashKey := opts.StringConfig("hash-key", "",
+		"16-byte hash key encoded as a 32-byte hex string")
+
+	awsAccessKey := opts.StringConfig("aws-access-key", "",
+		"the AWS Access Key for DynamoDB")
+
+	awsSecretKey := opts.StringConfig("aws-secret-key", "",
+		"the AWS Secret Key for DynamoDB")
 
 	awsRegion := opts.StringConfig("aws-region", "us-east-1",
 		"the AWS Region for DynamoDB [us-east-1]")
 
-	// masterTable := opts.StringConfig("master-table", "",
-	// 	"the DynamoDB table for the master lock")
+	masterTable := opts.StringConfig("master-table", "",
+		"the DynamoDB table for the master lock")
 
-	// masterTimeout := opts.IntConfig("master-timeout", 6000,
-	// 	"timeout in milliseconds for the master lock [6000]")
+	masterTimeout := opts.IntConfig("master-timeout", 6000,
+		"timeout in milliseconds for the master lock [6000]")
 
-	// routingTimeout := opts.IntConfig("routing-timeout", 3000,
-	// 	"timeout in milliseconds for routing entries [3000]")
+	routingTimeout := opts.IntConfig("routing-timeout", 3000,
+		"timeout in milliseconds for routing entries [3000]")
 
 	publishKey := opts.StringConfig("publish-key", "",
 		"the shared secret for publishing new items")
@@ -301,15 +319,16 @@ func main() {
 
 	// Parse the command line options.
 	os.Args[0] = "live-server"
-	debugMode, _, _, _ = runtime.DefaultOpts("live-server", opts, os.Args)
+	runtime.DefaultOpts("live-server", opts, os.Args)
 
-	// Initialise the TLS config if using TLS to communicate upstream.
-	if *upstreamTLS {
-		tlsconf.Init()
-	}
+	// Initialise the TLS config.
+	tlsconf.Init()
 
 	// Initialise ping/pong variables.
-	setupPong("live-server", *awsRegion)
+	setupPong("live-server", *clusterID)
+
+	// Initialise the key for hashing slots.
+	initHashKey(*hashKey)
 
 	// Ensure required config values.
 	if *publishKey == "" {
@@ -317,22 +336,18 @@ func main() {
 	}
 
 	server := &LiveServer{
+		httpClient:       &http.Client{Transport: &http.Transport{TLSClientConfig: tlsconf.Config}},
 		publishKey:       []byte(*publishKey),
 		publishKeyLength: len(*publishKey),
-		upstreamAddr:     fmt.Sprintf("%s:%d", *upstreamHost, *upstreamPort),
-		upstreamHost:     *upstreamHost,
-		upstreamPort:     *upstreamPort,
-		upstreamTLS:      *upstreamTLS,
 		websocketOrigin:  *websocketOrigin,
 	}
+
+	setUpstreamInfo(server, *upstreamHost, *upstreamPort, *upstreamTLS, *publishClusterID)
 
 	if *hstsMaxAge != 0 {
 		server.hstsEnabled = true
 		server.hsts = fmt.Sprintf("max-age=%d", *hstsMaxAge)
 	}
-
-	// Set response payload for acknowledging successful publish calls.
-	setAckInfo(*publishClusterID, server)
 
 	// Enable maintenance handling.
 	frontends := []Maintainable{server}
