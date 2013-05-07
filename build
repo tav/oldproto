@@ -223,8 +223,8 @@ def build(info):
             (str(k), str(v)) for k, v in decode_json(contents).iteritems()
             )
         info.assets = assets
-        info.init_css = read(join(build_dir, assets['init.css']))
-        info.init_js = read(join(build_dir, assets['init.js']))
+        info.init_css = read(join(build_dir, assets['init.css'])).strip()
+        info.init_js = read(join(build_dir, assets['init.js'])).strip()
 
     filepath = info.config_path
     statinfo = stat(filepath)
@@ -284,7 +284,7 @@ def build(info):
         contents = data['template/' + tmpl] = templates[tmpl] % data
         if tmpl.startswith('_'):
             continue
-        out("var html%sStr = `%s`\n\n" % (tmpl.title(), contents))
+        out("var html%sStr = `%s`\n\n" % (tmpl.title(), contents.strip()))
 
     progress("Generating html.go")
 
