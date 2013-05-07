@@ -1,4 +1,4 @@
-// Public Domain (-) 2011-2012 The Espra Authors.
+// Public Domain (-) 2011-2013 The Espra Authors.
 // See the Espra UNLICENSE file for details.
 
 package espra
@@ -10,7 +10,12 @@ import (
 	"net/http"
 )
 
-var devServer bool
+var (
+	devServer    bool
+	html404      = []byte(htmlErr404Str)
+	htmlHome     = []byte(htmlHomeStr)
+	htmlRedirect = []byte(htmlRedirectStr)
+)
 
 func handle(w http.ResponseWriter, r *http.Request) {
 	host := r.URL.Host
@@ -26,7 +31,7 @@ func handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch host {
-	case officialHost:
+	case officialHost, "":
 		// Fast path the root request.
 		if path == "/" {
 			renderIndex(w, r)
@@ -70,13 +75,13 @@ func renderIndex(w http.ResponseWriter, r *http.Request) {
 		render(htmlHome, w)
 		return
 	}
-	render(htmlAnonHome, w)
+	render(htmlHome, w)
+	// render(htmlAnonHome, w)
 }
 
 func init() {
 	if appengine.IsDevAppServer() {
 		devServer = true
-		officialHost = devHost
 	}
 	http.DefaultServeMux.Handle("/", http.HandlerFunc(handle))
 }
