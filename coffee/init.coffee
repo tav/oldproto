@@ -125,7 +125,7 @@
     for [name, url, version] in browsers
       link = """<a href="#{url}" title="Upgrade to the latest #{name}" """
       li = doc[createElement] 'li'
-      li[innerHTML] = """#{link} class="img"><img src="#{STATIC}#{ASSETS['gfx/' + name + '.png']}" alt="#{name}"></a><div>#{link}>#{name} #{version}+</a></div>""" # emacs "
+      li[innerHTML] = """#{link} class="img"><img src="#{STATIC}browsers/#{name}.png" alt="#{name}"></a><div>#{link}>#{name} #{version}+</a></div>""" # emacs "
       ul[appendChild] li
 
     c[appendChild] h1
