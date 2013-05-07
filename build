@@ -1,6 +1,6 @@
 #! /usr/bin/env python2.7
 
-# Public Domain (-) 2008-2012 The Espra Authors.
+# Public Domain (-) 2008-2013 The Espra Authors.
 # See the Espra UNLICENSE file for details.
 
 """Build script for Proto Espra."""
@@ -46,6 +46,8 @@ if platform.startswith('darwin'):
     PLATFORM = 'darwin'
 elif platform.startswith('linux'):
     PLATFORM = 'linux'
+elif platform == 'win32':
+    PLATFORM = 'windows'
 else:
     error("The %r operating system isn't currently supported" % platform)
 
@@ -108,12 +110,17 @@ def download_gae_sdk(runtime):
     version_file = join(target_dir, 'VERSION')
 
     if runtime == 'java':
-        if exists(join(
-            target_dir, 'lib', 'user',
-            'appengine-api-labs-%s.jar' % META['gae-version']
-            )):
-            success("%s is up-to-date." % name)
-            return
+        user_dir = join(target_dir, 'lib', 'user')
+        if exists(user_dir):
+            if exists(join(
+                user_dir,
+                'appengine-api-labs-%s.jar' % META['gae-version']
+                )):
+                success("%s is up-to-date." % name)
+                return
+            for subdir in listdir(user_dir):
+                if subdir.startswith('appengine-api-labs-'):
+                    sdk_version = subdir.rsplit('.')[0].split('-')[-1]
     elif exists(version_file):
         sdk_version_file = open(version_file, 'rb')
         sdk_version = sdk_version_file.readline().split()
