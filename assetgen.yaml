@@ -1,4 +1,4 @@
-# Public Domain (-) 2011-2012 The Espra Authors.
+# Public Domain (-) 2011-2013 The Espra Authors.
 # See the Espra UNLICENSE file for details.
 
 generate:
@@ -6,10 +6,12 @@ generate:
 - client.js:
     source:
       - raw: |
-          // Public Domain (-) 2011-2012 The Espra Authors.
+          // Public Domain (-) 2011-2013 The Espra Authors.
           // See the Espra UNLICENSE file for details.
       - https://raw.github.com/tav/jsutil/master/define.coffee
       - https://raw.github.com/tav/jsutil/master/ucd.js
+      - https://raw.github.com/tav/jsutil/master/domly.coffee
+      - coffee/notifi.coffee
       - coffee/client.coffee
 
 - init.css:
@@ -24,14 +26,14 @@ generate:
 - site.css:
     source:
       - raw: |
-          /* Public Domain (-) 2011-2012 The Espra Authors.
+          /* Public Domain (-) 2011-2013 The Espra Authors.
            * See the Espra UNLICENSE file for details. */
       - sass/site.sass
 
 - update.css:
     source:
       - raw: |
-          /* Public Domain (-) 2011-2012 The Espra Authors.
+          /* Public Domain (-) 2011-2013 The Espra Authors.
            * See the Espra UNLICENSE file for details. */
       - sass/update.sass
 
