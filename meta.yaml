@@ -1,13 +1,14 @@
-# Public Domain (-) 2012 The Espra Authors.
+# Public Domain (-) 2012-2013 The Espra Authors.
 # See the Espra UNLICENSE file for details.
 
 dist-checksum:
 dist-version:
 
-gae-version: 1.7.4
-gae-version-name: 1.7.4
+gae-version: 1.7.7
+gae-version-name: 1.7.7
 
-go-darwin-sdk: 581a9ee6056b08c4109ae027dc67728c0193898e
-go-linux-sdk: ac462867117005910ed57872ddefa87aac0cc4ac
-java-sdk: 62fb9e7a6ed1bd2525741eca175e101c500399a2
-python-sdk: 05eaddb534e3cb1d002cdaa529ff75ef36a30026
+go-darwin-sdk: bf899c3b36df67af6afa1fd86018be02250a87a9
+go-linux-sdk: c53b275beb9ca6b4816c6b7d3df68cf7f5208e19
+go-windows-sdk: f6779891911d5e68a34aa93c8727db5acec9c2e6
+java-sdk: 28d0d68a050938ad3517cd9c4a30601b67d44742
+python-sdk: 030b194351c99a706bbb35af0caf7496ccef319b
