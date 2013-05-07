@@ -11,4 +11,5 @@ go-darwin-sdk: bf899c3b36df67af6afa1fd86018be02250a87a9
 go-linux-sdk: c53b275beb9ca6b4816c6b7d3df68cf7f5208e19
 go-windows-sdk: f6779891911d5e68a34aa93c8727db5acec9c2e6
 java-sdk: 28d0d68a050938ad3517cd9c4a30601b67d44742
+java-sdk-version: 1.7.7.1
 python-sdk: 030b194351c99a706bbb35af0caf7496ccef319b
