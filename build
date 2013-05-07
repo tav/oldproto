@@ -73,8 +73,10 @@ def read(filename):
 
 META = get_yaml_conf('meta.yaml')
 
+JAVA_SDK_VERSION = META.get('java-sdk-version') or META['gae-version']
+
 GAE_SDK_FILES = {
-    'java': "appengine-java-sdk-%s.zip" % META['gae-version'],
+    'java': "appengine-java-sdk-%s.zip" % JAVA_SDK_VERSION,
     'go': "go_appengine_sdk_%s_amd64-%s.zip" % (PLATFORM, META['gae-version']),
     'python': "google_appengine_%s.zip" % META['gae-version']
 }
@@ -114,7 +116,7 @@ def download_gae_sdk(runtime):
         if exists(user_dir):
             if exists(join(
                 user_dir,
-                'appengine-api-labs-%s.jar' % META['gae-version']
+                'appengine-api-labs-%s.jar' % JAVA_SDK_VERSION
                 )):
                 success("%s is up-to-date." % name)
                 return
@@ -260,7 +262,14 @@ def build(info):
     data = info.config.copy()
     data['assets'] = info.assets
     data['init.css'] = info.init_css
-    data['init.js'] = info.init_js
+
+    init_js = info.init_js
+    for prop in info.config.keys():
+        if prop.startswith('init-'):
+            iprop = '$' + prop[5:]
+            init_js = init_js.replace(iprop, repr(info.config[prop]))
+
+    data['init.js'] = init_js
 
     progress("Generating templates")
 
