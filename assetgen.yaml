@@ -14,6 +14,10 @@ generate:
       - coffee/notifi.coffee
       - coffee/client.coffee
 
+- gfx/*:
+    source: etc/gfx/*
+    type: binary
+
 - init.css:
     source:
       - sass/init.sass
@@ -36,6 +40,9 @@ generate:
           /* Public Domain (-) 2011-2013 The Espra Authors.
            * See the Espra UNLICENSE file for details. */
       - sass/update.sass
+
+css.embed.path.root: etc/
+css.embed.only: true
 
 output.directory: app/build
 output.hashed: true
