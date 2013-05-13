@@ -243,14 +243,14 @@ func main() {
 
 	// Define the options for the command line and config file options parser.
 	opts := optparse.Parser(
-		"Usage: live-server <config.yaml> [options]\n",
-		"live-server 0.0.1")
+		"Usage: matchweb <config.yaml> [options]\n",
+		"matchweb 0.0.1")
 
 	host := opts.StringConfig("host", "",
-		"the host to bind the live-server to")
+		"the host to bind the matchweb to")
 
 	port := opts.IntConfig("port", 9040,
-		"the port to bind the live-server to [9040]")
+		"the port to bind the matchweb to [9040]")
 
 	redirectURL := opts.StringConfig("redirect-url", "",
 		"the URL that the HTTP Redirector redirects to")
@@ -318,14 +318,14 @@ func main() {
 	}
 
 	// Parse the command line options.
-	os.Args[0] = "live-server"
-	runtime.DefaultOpts("live-server", opts, os.Args)
+	os.Args[0] = "matchweb"
+	runtime.DefaultOpts("matchweb", opts, os.Args)
 
 	// Initialise the TLS config.
 	tlsconf.Init()
 
 	// Initialise ping/pong variables.
-	setupPong("live-server", *clusterID)
+	setupPong("matchweb", *clusterID)
 
 	// Initialise the key for hashing slots.
 	initHashKey(*hashKey)
