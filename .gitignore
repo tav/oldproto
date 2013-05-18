@@ -24,6 +24,7 @@ matchweb/*.yaml
 matchweb/matchweb
 matchweb/log
 matchweb/run
+pkg
 private
 
 # hidden files/directories
