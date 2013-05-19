@@ -77,6 +77,7 @@ func main() {
 				log.Info("%v", prettyStr)
 			}
 			out.Write([]byte(fmt.Sprintf("  exports['%s'] = `%s`\n", basename, data)))
+			log.Info("compiled '%s'", name)
 		}
 
 	}
