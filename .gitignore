@@ -4,8 +4,6 @@
 .appengine_java_sdk
 .appengine_python_sdk
 
-app/build
-app/espra/html.go
 assets.json
 blobnode/*.yaml
 blobnode/log
@@ -15,6 +13,7 @@ blobnode/serve/bg.json
 coffee/*.js
 dist
 etc
+html2domly/html2domly
 java/war
 matchdb/*.yaml
 matchdb/log
@@ -26,6 +25,8 @@ matchweb/log
 matchweb/run
 pkg
 private
+src/build
+src/espra/html.go
 
 # hidden files/directories
 
