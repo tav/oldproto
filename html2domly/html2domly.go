@@ -19,6 +19,8 @@ func main() {
 
 	outputFile := opts.String([]string{"-o", "--output"}, "../coffee/templates.coffee", "coffeescript file to compile to", "PATH")
 	templatesSrcDir := opts.String([]string{"-i", "--input"}, "../etc/domly", "templatate source directory", "PATH")
+	printJSON := opts.Bool([]string{"--print"}, false, "Print the JSON nicely to the output logger")
+
 	os.Args[0] = "html2domly"
 	opts.Parse(os.Args)
 
@@ -69,7 +71,7 @@ func main() {
 			if err != nil {
 				log.StandardError(err)
 				log.Info("%v", data)
-			} else {
+			} else if *printJSON {
 				prettyStr = pretty.String()
 				pretty.Reset()
 				log.Info("%v", prettyStr)
@@ -80,7 +82,8 @@ func main() {
 	}
 	out.Write([]byte("  return"))
 
-	log.Info("compiled domly written to: %v", *outputFile)
+	outPath, _ := filepath.Abs(*outputFile)
+	log.Info("compiled domly written to: %v", outPath)
 
 	log.Wait()
 
