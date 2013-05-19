@@ -11,6 +11,7 @@ generate:
       - https://raw.github.com/tav/jsutil/master/define.coffee
       - https://raw.github.com/tav/jsutil/master/ucd.js
       - https://raw.github.com/tav/jsutil/master/domly.coffee
+      - coffee/templates.coffee
       - coffee/notifi.coffee
       - coffee/client.coffee
 
@@ -32,6 +33,7 @@ generate:
       - raw: |
           /* Public Domain (-) 2011-2013 The Espra Authors.
            * See the Espra UNLICENSE file for details. */
+      - sass/icons.sass
       - sass/site.sass
 
 - update.css:
@@ -44,7 +46,7 @@ generate:
 css.embed.path.root: etc/
 css.embed.only: true
 
-output.directory: app/build
+output.directory: src/build
 output.hashed: true
 output.manifest: assets.json
 
