@@ -4,6 +4,7 @@
 package db
 
 import (
+	"espra/datetime"
 	"time"
 )
 
@@ -104,17 +105,17 @@ type ScryptParams struct {
 }
 
 type Session struct {
-	Client     string    `datastore:"c,noindex"`
-	Expires    Timestamp `datastore:"e"`
-	Initiated  time.Time `datastore:"i,noindex"`
-	RememberMe bool      `datastore:"r,noindex"`
-	Salt       []byte    `datastore:"s,noindex"`
+	Client     string             `datastore:"c,noindex"`
+	Expires    datetime.Timestamp `datastore:"e"`
+	Initiated  time.Time          `datastore:"i,noindex"`
+	RememberMe bool               `datastore:"r,noindex"`
+	Salt       []byte             `datastore:"s,noindex"`
 }
 
 type User struct {
-	FullName string    `datastore:"f,noindex"`
-	Gender   string    `datastore:"g"`
-	Joined   Timestamp `datastore:"j"`
-	Location string    `datastore:"c"`
-	Version  int       `datastore:"v" json:"-"`
+	FullName string             `datastore:"f,noindex"`
+	Gender   string             `datastore:"g"`
+	Joined   datetime.Timestamp `datastore:"j"`
+	Location string             `datastore:"c"`
+	Version  int                `datastore:"v" json:"-"`
 }
