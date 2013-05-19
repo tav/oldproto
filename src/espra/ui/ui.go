@@ -16,8 +16,6 @@ import (
 
 var bodyNode = &html.Node{Data: "body", DataAtom: atom.Body, Type: html.ElementNode}
 
-//var replacements = map[string]string
-
 var replacements = map[string]string{
 	"cellpadding":     "cellPadding",
 	"cellspacing":     "cellSpacing",
@@ -30,7 +28,7 @@ var replacements = map[string]string{
 	"rowspan":         "rowSpan",
 	"tabindex":        "tabIndex",
 	"usemap":          "useMap",
-	"for":             "htmlFor"}
+}
 
 func ParseHTML5(filename string) ([]*html.Node, error) {
 	reader, err := os.Open(filename)
@@ -45,7 +43,15 @@ func GenDomlyNode(domNode *html.Node) db.Domly {
 		if len(domNode.Attr) != 0 { // != nil {
 			attrs := db.DomlyAttrs{}
 			for _, attr := range domNode.Attr {
-				attrs[attr.Key] = attr.Val
+				key := attr.Key
+				if len(replacements[key]) > 0 {
+					key = replacements[key]
+				}
+				if domNode.Data == "label" && key == "for" {
+					key = "htmlFor"
+				}
+
+				attrs[key] = attr.Val
 			}
 			data = append(data, attrs)
 		}
