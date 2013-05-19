@@ -32,6 +32,11 @@ const (
 	LinkRefTerm      = "\x05"
 )
 
+// might be good to write a custom Marshaler for this type to speed up JSON Serialisation=
+type Domly []interface{}
+
+type DomlyAttrs map[string]interface{} //string or slice of Domly
+
 type Field struct {
 	Key   string
 	Value interface{}
