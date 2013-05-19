@@ -18,7 +18,7 @@ from urllib import urlopen
 from zipfile import ZipFile
 
 from plumbum import FG, local
-from plumbum.cmd import ant, assetgen
+from plumbum.cmd import ant, assetgen, go
 from yaml import load as load_yaml
 
 # ------------------------------------------------------------------------------
@@ -199,6 +199,22 @@ class BuildInfo(object):
 
 def build(info):
 
+    rebuild_domly_templates = 0
+    if exists(info.domly_templates_path):
+        mtime = stat(info.domly_templates_path).st_mtime
+        parent = info.domly_templates_dir
+        for filename in listdir(parent):
+            if stat(join(parent, filename)).st_mtime < mtime:
+                rebuild_domly_templates = 1
+                break
+    else:
+        rebuild_domly_templates = 1
+
+    if rebuild_domly_templates:
+        progress("Generating templates.coffee")
+        with local.cwd(info.h2d):
+            go['run', 'html2domly.go'] & FG
+
     progress("Running assetgen")
     if info.profile:
         with local.cwd(SCRIPT_ROOT):
@@ -223,8 +239,8 @@ def build(info):
             (str(k), str(v)) for k, v in decode_json(contents).iteritems()
             )
         info.assets = assets
-        info.init_css = read(join(build_dir, assets['init.css'])).strip()
-        info.init_js = read(join(build_dir, assets['init.js'])).strip()
+        info.init_css = read(join(build_dir, assets.pop('init.css'))).strip()
+        info.init_js = read(join(build_dir, assets.pop('init.js'))).strip()
 
     filepath = info.config_path
     statinfo = stat(filepath)
@@ -305,10 +321,13 @@ def app(profile='', watch=False):
 
     info = BuildInfo()
     info.assets_path = get_path("assets.json")
-    info.build_dir = get_path("app", "build")
+    info.build_dir = get_path("src", "build")
     info.cache = {}
     info.config_path = get_path("etc", "app", "config.yaml")
-    info.html_path = html_path = get_path("app", "espra", "html.go")
+    info.domly_templates_path = get_path("coffee", "templates.coffee")
+    info.domly_templates_dir= get_path("etc", "domly")
+    info.h2d = get_path('html2domly')
+    info.html_path = html_path = get_path("src", "espra", "html.go")
     info.profile = profile
     info.template_dir = get_path("etc", "template")
     info.templates = {}
@@ -344,7 +363,12 @@ def clean():
 
     start("Removing built app files")
 
-    html_path = get_path("app", "espra", "html.go")
+    templates_path = get_path("coffee", "templates.coffee")
+    if exists(templates_path):
+        progress("Removing templates.coffee")
+        remove(templates_path)
+
+    html_path = get_path("src", "espra", "html.go")
     if exists(html_path):
         progress("Removing html.go")
         remove(html_path)
