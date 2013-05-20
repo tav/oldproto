@@ -10,7 +10,7 @@ generate:
           // See the Espra UNLICENSE file for details.
       - https://raw.github.com/tav/jsutil/master/define.coffee
       - https://raw.github.com/tav/jsutil/master/ucd.js
-      - https://raw.github.com/tav/jsutil/master/domly.coffee
+      - coffee/domly.coffee
       - coffee/templates.coffee
       - coffee/notifi.coffee
       - coffee/client.coffee
