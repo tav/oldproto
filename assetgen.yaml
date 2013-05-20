@@ -33,7 +33,6 @@ generate:
       - raw: |
           /* Public Domain (-) 2011-2013 The Espra Authors.
            * See the Espra UNLICENSE file for details. */
-      - sass/icons.sass
       - sass/site.sass
 
 - update.css:
