@@ -5,20 +5,28 @@ package rpc
 
 import (
 	"appengine"
+	"appengine/datastore"
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"github.com/tav/golly/structure"
 	"io"
 	"io/ioutil"
 	"net/http"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 )
 
+const (
+	ShortCache  = 63
+	MediumCache = 3600
+	LongCache   = 86400
+)
+
 var (
 	ctxType = reflect.TypeOf(&Context{})
+	errType = reflect.TypeOf((*error)(nil)).Elem()
 	free    *Context
 	mutex   sync.Mutex
 )
@@ -37,12 +45,43 @@ type Context struct {
 	req        *request
 }
 
-func (ctx *Context) Redirect(location string) {
-	panic(redirect(location))
-}
-
 func (ctx *Context) Error(format string, a ...interface{}) {
 	panic(fmt.Errorf(format, a...))
+}
+
+func (ctx *Context) ParseUint(value, errorFormat string, defaultValue uint64) uint64 {
+	if value == "" {
+		return defaultValue
+	}
+	v, err := strconv.ParseUint(value, 10, 64)
+	if err != nil {
+		panic(fmt.Errorf(errorFormat, value))
+	}
+	return v
+}
+
+func (ctx *Context) Get(key *datastore.Key, dst interface{}) error {
+	return datastore.Get(ctx.App, key, dst)
+}
+
+func (ctx *Context) Put(key *datastore.Key, src interface{}) (*datastore.Key, error) {
+	return datastore.Put(ctx.App, key, src)
+}
+
+func (ctx *Context) IntKey(kind string, id int64, parent *datastore.Key) *datastore.Key {
+	return datastore.NewKey(ctx.App, kind, "", id, parent)
+}
+
+func (ctx *Context) NewKey(kind string, parent *datastore.Key) *datastore.Key {
+	return datastore.NewKey(ctx.App, kind, "", 0, parent)
+}
+
+func (ctx *Context) StrKey(kind, name string, parent *datastore.Key) *datastore.Key {
+	return datastore.NewKey(ctx.App, kind, name, 0, parent)
+}
+
+func (ctx *Context) Redirect(location string) {
+	panic(redirect(location))
 }
 
 func getContext() *Context {
@@ -74,13 +113,20 @@ func freeContext(ctx *Context) {
 type service struct {
 	anon   bool
 	args   []reflect.Type
+	cache  int
 	in     int
 	meth   reflect.Value
-	stream bool
+	isGet  bool
+	retErr bool
 }
 
 func (s *service) Anon() *service {
 	s.anon = true
+	return s
+}
+
+func (s *service) Cache(duration int) *service {
+	s.cache = duration
 	return s
 }
 
@@ -106,7 +152,7 @@ func Error(format string, a ...interface{}) {
 	panic(fmt.Errorf(format, a...))
 }
 
-func Handle(path string, w http.ResponseWriter, r *http.Request) {
+func Handle(w http.ResponseWriter, r *http.Request) {
 
 	var (
 		ctx  *Context
@@ -194,7 +240,16 @@ func Handle(path string, w http.ResponseWriter, r *http.Request) {
 	args[0] = reflect.ValueOf(ctx)
 	rargs := s.meth.Call(args)
 
-	res := &response{ctx.RespHeader, make([]interface{}, len(rargs))}
+	rlen := len(rargs)
+	if s.retErr {
+		if reterr := rargs[rlen-1].Interface().(error); reterr != nil {
+			panic(reterr)
+		}
+		rargs = rargs[:rlen-1]
+		rlen -= 1
+	}
+
+	res := &response{ctx.RespHeader, make([]interface{}, rlen)}
 	for i, arg := range rargs {
 		res.Reply[i] = arg.Interface()
 	}
@@ -209,13 +264,16 @@ func Handle(path string, w http.ResponseWriter, r *http.Request) {
 
 var doneOK = []byte{'d', 'o', 'n', 'e', '.'}
 
-func HandleStream(path string, w http.ResponseWriter, r *http.Request) {
+func HandleGet(path string, w http.ResponseWriter, r *http.Request) {
 
 	call := strings.Split(path, "/")
 	name := call[0]
-	sr := streamServices.Lookup(name)
 
-	if sr == nil {
+	m := appengine.NewContext(r)
+	m.Infof("path: %s", path)
+
+	s, exists := getServices[name]
+	if !exists {
 		http.NotFound(w, r)
 		return
 	}
@@ -233,11 +291,19 @@ func HandleStream(path string, w http.ResponseWriter, r *http.Request) {
 		if !sent {
 			if e := recover(); e != nil {
 				if redir, yes := e.(redirect); yes {
+					if s.cache > 60 {
+						w.Header().Set("Pragma", "public")
+						w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", s.cache))
+					}
 					http.Redirect(w, r, string(redir), 302)
 					return
 				}
 				http.Error(w, fmt.Sprint(e), 500)
 			} else {
+				if s.cache > 60 {
+					w.Header().Set("Pragma", "public")
+					w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", s.cache))
+				}
 				w.Write(resp)
 			}
 		}
@@ -249,7 +315,6 @@ func HandleStream(path string, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s := sr.(*service)
 	diff := s.in + 1 - len(call)
 
 	if diff < 0 {
@@ -279,14 +344,23 @@ func HandleStream(path string, w http.ResponseWriter, r *http.Request) {
 	args[0] = reflect.ValueOf(ctx)
 	rargs := s.meth.Call(args)
 
-	if len(rargs) == 0 {
+	rlen := len(rargs)
+	if s.retErr {
+		if reterr := rargs[rlen-1].Interface().(error); reterr != nil {
+			panic(reterr)
+		}
+		rargs = rargs[:rlen-1]
+		rlen -= 1
+	}
+
+	if rlen == 0 {
 		resp = doneOK
 	} else {
 		var (
 			ct string
 			v  interface{}
 		)
-		if len(rargs) == 2 {
+		if rlen == 2 {
 			ct = rargs[0].String()
 			v = rargs[1].Interface()
 		} else {
@@ -298,10 +372,10 @@ func HandleStream(path string, w http.ResponseWriter, r *http.Request) {
 			reader.Close()
 		} else if reader, ok := v.(io.Reader); ok {
 			resp, _ = ioutil.ReadAll(reader)
-		} else if stream, ok := v.([]byte); ok {
-			resp = stream
-		} else if stream, ok := v.(string); ok {
-			resp = []byte(stream)
+		} else if content, ok := v.([]byte); ok {
+			resp = content
+		} else if content, ok := v.(string); ok {
+			resp = []byte(content)
 		} else {
 			panic("unsupported response type: " + reflect.TypeOf(v).Kind().String())
 		}
@@ -311,11 +385,11 @@ func HandleStream(path string, w http.ResponseWriter, r *http.Request) {
 }
 
 var (
-	services       = map[string]*service{}
-	streamServices = structure.NewPrefixTree()
+	services    = map[string]*service{}
+	getServices = map[string]*service{}
 )
 
-func register(name string, v interface{}, stream bool) *service {
+func register(name string, v interface{}, isGet bool) *service {
 	rv := reflect.ValueOf(v)
 	rt := rv.Type()
 	if rt.Kind() != reflect.Func {
@@ -330,13 +404,19 @@ func register(name string, v interface{}, stream bool) *service {
 		args[i] = rt.In(i + 1)
 	}
 	s := &service{
-		args:   args,
-		meth:   rv,
-		in:     in,
-		stream: stream,
+		args:  args,
+		in:    in,
+		isGet: isGet,
+		meth:  rv,
 	}
-	if stream {
-		streamServices.Insert(name, s)
+	if respCount := rt.NumOut(); respCount >= 1 {
+		p := rt.Out(respCount - 1)
+		if p.Kind() == reflect.Interface && p.Implements(errType) {
+			s.retErr = true
+		}
+	}
+	if isGet {
+		getServices[name] = s
 	} else {
 		services[name] = s
 	}
@@ -347,7 +427,7 @@ func Register(name string, v interface{}) *service {
 	return register(name, v, false)
 }
 
-func RegisterStream(name string, v interface{}) *service {
+func RegisterGet(name string, v interface{}) *service {
 	return register(name, v, true)
 }
 
@@ -357,6 +437,6 @@ func (ns Namespace) Register(name string, v interface{}) *service {
 	return register(string(ns)+"."+name, v, false)
 }
 
-func (ns Namespace) RegisterStream(name string, v interface{}) *service {
+func (ns Namespace) RegisterGet(name string, v interface{}) *service {
 	return register(string(ns)+"."+name, v, true)
 }
