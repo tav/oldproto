@@ -16,7 +16,7 @@ $ sudo easy_install-2.7 -U plumbum
 $ sudo easy_install-2.7 -U PyYAML
 $ sudo gem install sass
 $ sudo npm install -g coffee-script@1.6.2
-$ sudo npm install -g uglifyjs@2.2.0
+$ sudo npm install -g uglify-js@2.2.0
 $ go get -u github.com/tav/golly
 ```
 
