@@ -91,8 +91,6 @@
     chromeBrowser = ['Chrome', 'http://www.google.com/chrome', '26']
     firefoxBrowser = ['Firefox', 'http://getfirefox.com', '20']
 
-    # We can hopefully add IE and Opera to this list once IE 10 and Opera 12 are
-    # officially released.
     browsers = [
       chromeBrowser
       ['IE', 'http://ie.microsoft.com', '10']
