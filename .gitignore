@@ -11,6 +11,7 @@ blobnode/blobnode
 blobnode/run
 blobnode/serve/bg.json
 coffee/*.js
+coffee/templates.coffee
 dist
 etc
 html2domly/html2domly
