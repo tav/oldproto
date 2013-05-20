@@ -8,6 +8,7 @@ import (
 	"appengine/datastore"
 	"bytes"
 	"encoding/json"
+	"espra/session"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -37,6 +38,7 @@ type Context struct {
 	App        appengine.Context
 	Header     Header
 	RespHeader Header
+	Username   string
 	buf        *bytes.Buffer
 	enc        *json.Encoder
 	meth       string
@@ -212,6 +214,23 @@ func Handle(w http.ResponseWriter, r *http.Request) {
 	call = call[1:]
 	if s.in != len(call) {
 		Error("bad request: %s takes %d arguments, got %d", ctx.meth, s.in, len(call))
+	}
+
+	if s.anon {
+		ctx.Username = ""
+	} else {
+		hdr, ok := ctx.req.Header["auth"]
+		if !ok {
+			panic("bad request: missing 'auth' header field")
+		}
+		auth, ok := hdr.(string)
+		if !ok {
+			panic("bad request: 'auth' header field needs to be a string")
+		}
+		ctx.Username, ok = session.Info(auth)
+		if !ok {
+			panic("auth expired")
+		}
 	}
 
 	args := make([]reflect.Value, s.in+1)
