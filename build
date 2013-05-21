@@ -204,7 +204,7 @@ def build(info):
         mtime = stat(info.domly_templates_path).st_mtime
         parent = info.domly_templates_dir
         for filename in listdir(parent):
-            if stat(join(parent, filename)).st_mtime < mtime:
+            if stat(join(parent, filename)).st_mtime > mtime:
                 rebuild_domly_templates = 1
                 break
     else:
