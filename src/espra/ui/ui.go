@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"unicode"
 )
 
 var bodyNode = &html.Node{Data: "body", DataAtom: atom.Body, Type: html.ElementNode}
@@ -24,10 +25,22 @@ const (
 
 const (
 	ItemText lex.ItemType = 2 + iota
-	ItemVar
+	ItemIdentifier
+	ItemString
+	ItemNumber
 	ItemSpace
 	ItemLeftDelim
 	ItemRightDelim
+	ItemBuiltin
+	ItemEspraURI
+	ItemPipe
+	ItemLeftParen
+	ItemRightParen
+	ItemOpenQuote
+	ItemCloseQuote
+)
+const (
+	ActionParenDepth = iota
 )
 
 var replacements = map[string]string{
@@ -56,27 +69,95 @@ func createLexer(name, input string, startfn lex.StateFn) *lex.Lexer {
 		Name:  name,
 		Input: input,
 		Items: make(chan lex.Item),
-		/* IntState: lex.IntState{
-			StateLeftDelimLen: len(leftDelim),
-		}, */
+		IntState: lex.IntState{
+			ActionParenDepth: 0,
+		},
 	}
 	go l.Run(startfn)
 	return l
 }
 
-func Variable(l *lex.Lexer) lex.StateFn {
+func IsValidIdentifierChar(r rune) bool {
+	if unicode.IsDigit(r) || unicode.IsLetter(r) || r == '_' || r == '-' || r == '.' {
+		return true
+	}
+	return false
+}
+
+func EspraURI(l *lex.Lexer) lex.StateFn {
+	l.Emit(ItemEspraURI)
+	return InsideAction
+}
+
+func Builtin(l *lex.Lexer) lex.StateFn {
 	for {
-		if !lex.IsAlphaNumeric(l.Next()) {
+		if !IsValidIdentifierChar(l.Next()) {
 			l.Backup()
 			break
 		}
 	}
-	l.Emit(ItemVar)
+	l.Emit(ItemBuiltin)
+	return InsideAction
+}
+
+func Identifier(l *lex.Lexer) lex.StateFn {
+	for {
+		if !IsValidIdentifierChar(l.Next()) {
+			l.Backup()
+			break
+		}
+	}
+	l.Emit(ItemIdentifier)
+	return InsideAction
+}
+
+func Number(l *lex.Lexer) lex.StateFn {
+	//
+	l.Emit(ItemNumber)
+	return InsideAction
+}
+
+// Quote scans a quoted string.
+func String(l *lex.Lexer) lex.StateFn {
+Loop:
+	for {
+		switch l.Next() {
+		case '\\':
+			// ???
+			if r := l.Next(); r != lex.EOF && r != '\n' {
+				break
+			}
+			fallthrough
+		case lex.EOF, '\n':
+			return l.Errorf("unterminated quoted string")
+		case '"', '\'':
+			l.Backup()
+			break Loop
+		}
+	}
+	l.Emit(ItemString)
+	l.Next()
+	l.Emit(ItemCloseQuote)
 	return InsideAction
 }
 
 func InsideAction(l *lex.Lexer) lex.StateFn {
+	// first identifier may be a func or a var --
+	// then everything is a var unless its the first identifier inside parens the its a func
+
+	// add keyword key:var
+	// add espraURI func or attr
+	// Number
+
+	// add if and for -- HTML5 parser ordered?
+
+	// deal with errors nicely
+	// reuse/reset the lexer
+
 	if strings.HasPrefix(l.Input[l.Pos:], rightDelim) {
+		if l.IntState[ActionParenDepth] > 0 {
+			return l.Errorf("unmatched parentheses")
+		}
 		return RightDelim
 	}
 
@@ -86,11 +167,34 @@ func InsideAction(l *lex.Lexer) lex.StateFn {
 		return l.Errorf("unclosed action")
 	case lex.IsSpace(r):
 		return Space
-	case lex.IsAlphaNumeric(r):
-		l.Backup()
-		return Variable
+	case unicode.IsLetter(r): //variable and function must begin with a letter
+		return Identifier
+	case r == '!':
+		if unicode.IsLetter(l.Peek()) {
+			return Builtin
+		}
+		return l.Errorf("invalid character in builtin")
+	case r == '#' || r == '+':
+		if unicode.IsLetter(l.Peek()) {
+			return EspraURI
+		}
+		return l.Errorf("invalid character in URI")
+	case unicode.IsDigit(r):
+		return Number
+	case r == '\'' || r == '"':
+		l.Emit(ItemOpenQuote)
+		return String
+	case r == '(':
+		l.IntState[ActionParenDepth] += 1
+		l.Emit(ItemLeftParen)
+	case r == ')':
+		l.IntState[ActionParenDepth] -= 1
+		l.Emit(ItemRightParen)
+	case r == '|':
+		l.Emit(ItemPipe)
+	default:
+		return l.Errorf("Unexpected Character '%s'", string(r))
 	}
-
 	return InsideAction
 }
 
@@ -146,13 +250,22 @@ var debugNames = map[lex.ItemType]string{
 	lex.ItemError:  "ERROR",
 	lex.ItemEOF:    "EOF",
 	ItemText:       "TEXT",
-	ItemVar:        "VAR",
+	ItemIdentifier: "IDENTIFIER",
+	ItemString:     "STR",
+	ItemNumber:     "INT",
 	ItemSpace:      "SPACE",
 	ItemLeftDelim:  "LEFT DELIM",
 	ItemRightDelim: "RIGHT DELIM",
+	ItemBuiltin:    "BUILTIN",
+	ItemEspraURI:   "URI IDENTIFIER",
+	ItemPipe:       "PIPE",
+	ItemLeftParen:  "LEFT PARENS",
+	ItemRightParen: "RIGHT PARENS",
+	ItemOpenQuote:  "QUOTE OPEN",
+	ItemCloseQuote: "QUOTE CLOSE",
 }
 
-func ParseTextNode(input string) db.Domly {
+func ParseTextNode(input string) (db.Domly, error) {
 
 	l := createLexer("LextTextNode", input, LexTextNode)
 	for item := range l.Items {
@@ -160,14 +273,21 @@ func ParseTextNode(input string) db.Domly {
 		if item.Typ == lex.ItemEOF {
 			break
 		}
+		if item.Typ == lex.ItemError {
+			return db.Domly{}, error(fmt.Errorf("Failed: %s", item.Val))
+		}
 	}
-	return db.Domly{}
+	return db.Domly{}, nil
 
 }
 
-func GenDomlyNode(domNode *html.Node) db.Domly {
+func GenDomlyNode(domNode *html.Node) (db.Domly, error) {
 	data := db.Domly{}
 	var textNodeDomly db.Domly
+	var node db.Domly
+
+	var errr error
+	errr = nil
 	if domNode.Type == html.ElementNode {
 		data = append(data, domNode.Data)
 		if len(domNode.Attr) != 0 { // != nil {
@@ -187,28 +307,38 @@ func GenDomlyNode(domNode *html.Node) db.Domly {
 		}
 		for c := domNode.FirstChild; c != nil; c = c.NextSibling {
 			if c.Type == html.ElementNode {
-				data = append(data, GenDomlyNode(c))
+				node, errr = GenDomlyNode(c)
+				if errr != nil {
+					return data, errr
+				}
+				data = append(data, node)
 			} else if c.Type == html.TextNode {
-				textNodeDomly = ParseTextNode(c.Data) // for each token parse attribute values and text node
+				textNodeDomly, errr = ParseTextNode(c.Data) // for each token parse attribute values and text node
+				if errr != nil {
+					return data, errr
+				}
 				data = append(data, textNodeDomly)
 			}
 		}
 	}
 
-	return data
+	return data, nil
 }
 
-func GenDomly(domfrag []*html.Node) db.Domly {
+func GenDomly(domfrag []*html.Node) (db.Domly, error) {
 	// The db.Domly format looks like: [tagName, attr1:val1, attr2:val2..., 'Text' | ChildNodes ]
 	// what to do with TextNodes mixed with nested tagged content e.g. "sdfds ds <b>sdgtd </b>". Is there an explicit TextNode domly expression?
 
 	data := db.Domly{}
+	var node_data db.Domly
+	var err error
 	for _, node := range domfrag {
 		if node.Type == html.ElementNode {
-			data = append(data, GenDomlyNode(node))
+			node_data, err = GenDomlyNode(node)
+			data = append(data, node_data)
 		}
 	}
-	return data
+	return data, err
 }
 
 func GenJSON(data db.Domly) ([]byte, error) {
@@ -262,7 +392,11 @@ func ParseTemplate(template_path string) ([]byte, error) {
 
 	DomTree2HTML(DOMTree) //print the parsed HTML
 
-	data := GenDomly(DOMTree)
+	data, err := GenDomly(DOMTree)
+	if err != nil {
+		fmt.Printf("%v", err)
+		return []byte{}, err
+	}
 	fmt.Printf("%s", data)
 
 	json, err := GenJSON(data)
