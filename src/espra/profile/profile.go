@@ -6,16 +6,13 @@ package profile
 import (
 	"appengine/datastore"
 	"code.google.com/p/go.crypto/scrypt"
-	"crypto/hmac"
-	"crypto/sha256"
 	"crypto/subtle"
-	"encoding/base64"
 	"errors"
-	"espra/config"
 	"espra/datetime"
 	"espra/db"
 	"espra/ident"
 	"espra/rpc"
+	"espra/session"
 	"fmt"
 	"strings"
 	"time"
@@ -37,17 +34,6 @@ var (
 	ErrEmptyPassphrase = errors.New("the passphrase parameter cannot be empty")
 	ErrInvalidLogin    = errors.New("invalid login")
 )
-
-func encodeSession(username, timestamp string, loginID, sessionID int64) string {
-	code := fmt.Sprintf("%s|%s|%d|%d", username, timestamp, loginID, sessionID)
-	hash := hmac.New(sha256.New, config.SessionKey)
-	hash.Write([]byte(code))
-	mac := base64.URLEncoding.EncodeToString(hash.Sum(nil))
-	return fmt.Sprintf("%s:%s", code, mac)
-}
-
-func decodeSession(string) {
-}
 
 func Login(ctx *rpc.Context, req *LoginInfo) (string, error) {
 	if req.Login == "" {
@@ -101,17 +87,21 @@ func Login(ctx *rpc.Context, req *LoginInfo) (string, error) {
 		return "", ErrInvalidLogin
 	}
 	now := datetime.UTC()
-	session := &db.Session{
+	sess := &db.Session{
 		Client:     req.Client,
 		Expires:    datetime.From(now.Add(time.Hour)),
 		Initiated:  now,
 		RememberMe: req.RememberMe,
 	}
-	key, err := ctx.Put(ctx.NewKey("S", loginKey), session)
+	key, err := ctx.Put(ctx.NewKey("S", loginKey), sess)
 	if err != nil {
 		return "", err
 	}
-	return encodeSession(login.Username, string(session.Expires)[1:], loginKey.IntID(), key.IntID()), nil
+	return session.Encode(login.Username, string(sess.Expires)[1:], loginKey.IntID(), key.IntID()), nil
+}
+
+func SessionRenew(ctx *rpc.Context, auth string) (string, bool) {
+	return "", false
 }
 
 func Signup(ctx *rpc.Context, req *LoginInfo) (bool, string, error) {
@@ -136,6 +126,7 @@ func Gravatar(ctx *rpc.Context, username string, size string) error {
 
 func init() {
 	rpc.Register("login", Login).Anon()
+	rpc.Register("session.renew", SessionRenew)
 	rpc.Register("signup", Signup).Anon()
 	rpc.Register("signup.details", Signup).Anon()
 	rpc.RegisterGet("profile.gravatar", Gravatar).Cache(rpc.LongCache)
