@@ -11,22 +11,48 @@ import (
 	"fmt"
 )
 
-func parseMsg(message string, terms []string) (db.Domly, []string, string) {
+type WebLink struct {
+	Host string
+	URL  string
 }
 
-func Create(ctx *rpc.Context, space, by, head string, parents []string) error {
+// Returns (domlyAsJSON, references, slashTag, hostURIs)
+func parseMsg(message string, terms []string) ([]byte, []string, string, []*WebLink) {
+	return []byte("[]"), []string{"foo", "bar"}, "", []*WebLink{}
+}
+
+type CreateRequest struct {
+	By      string
+	Head    string
+	Space   string
+	Parents []string
+}
+
+func Create(ctx *rpc.Context, req *CreateRequest) error {
+
 	item := &db.Item{}
-	var ok bool
 	terms := []string{}
-	if item.Space, ok = ident.Ref(to); !ok {
-		return fmt.Errorf("invalid user/space identifier in the 'space' field: %s", to)
+
+	var ok bool
+
+	if item.Space, ok = ident.Ref(req.Space); !ok {
+		return fmt.Errorf("invalid user/space identifier in the 'space' field: %s", req.Space)
 	}
-	terms = append(terms, SpaceTerm+item.Space)
-	if item.By, ok = ident.User(by); !ok {
-		return fmt.Errorf("invalid user identifier in the 'by' field: %s", by)
+
+	terms = append(terms, db.SpaceTerm+item.Space)
+
+	if item.By, ok = ident.Username(req.By); !ok {
+		return fmt.Errorf("invalid username in the 'by' field: %s", req.By)
 	}
-	terms = append(terms, ByTerm+item.By[1:])
-	item.Domly, index.Terms, item.SlashTag = parseMsg(head, terms)
+
+	terms = append(terms, db.ByTerm+item.By[1:])
+
+	index := &db.Index{}
+	item.Domly, index.Terms, item.SlashTag, _ = parseMsg(req.Head, terms)
+	_ = datastore.Delete
+
+	return nil
+
 }
 
 func init() {
