@@ -6,8 +6,10 @@ package espra
 import (
 	"appengine"
 	"espra/backend"
+	"espra/config"
 	"espra/rpc"
 	"net/http"
+	"strings"
 )
 
 var (
@@ -25,13 +27,13 @@ func handle(w http.ResponseWriter, r *http.Request) {
 		if query.Get("__host__") != "" {
 			host = query.Get("__host__")
 		}
-	} else if r.URL.Scheme != "https" && host != redirectHost {
+	} else if r.URL.Scheme != "https" && host != config.RedirectHost {
 		r.URL.Scheme = "https"
 		http.Redirect(w, r, r.URL.String(), 301)
 		return
 	}
 	switch host {
-	case officialHost, "":
+	case config.OfficialHost, "":
 		// Fast path the root request.
 		if path == "/" {
 			renderIndex(w, r)
@@ -40,24 +42,28 @@ func handle(w http.ResponseWriter, r *http.Request) {
 		if len(path) >= 2 && path[:2] == "/_" {
 			switch path {
 			case "/_api":
-				rpc.Handle(path, w, r)
+				rpc.Handle(w, r)
 			case "/_ah/start":
 				backend.Start(w, r)
 			case "/_ah/stop":
 				backend.Stop(w, r)
 			default:
-				w.WriteHeader(404)
-				w.Write(html404)
+				if strings.HasPrefix(path, "/_get/") {
+					rpc.HandleGet(path[6:], w, r)
+				} else {
+					w.WriteHeader(404)
+					w.Write(html404)
+				}
 			}
 		} else {
 			renderIndex(w, r)
 		}
-	case redirectHost:
+	case config.RedirectHost:
 		render(htmlRedirect, w)
 	default:
 		// TODO(tav): Extend this to support scripted interfaces on custom
 		// domains.
-		r.URL.Host = officialHost
+		r.URL.Host = config.OfficialHost
 		http.Redirect(w, r, r.URL.String(), 301)
 		return
 	}
