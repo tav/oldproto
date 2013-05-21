@@ -6,7 +6,7 @@ define 'espra', (exports, root) ->
   doc = root.document
   doc.$ = doc.getElementById
   body = doc.body
-  domly = util.domly
+  domly = exports.domly
   local = root.localStorage
 
   # Create the root #body container element.
