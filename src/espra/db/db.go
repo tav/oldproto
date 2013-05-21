@@ -55,7 +55,8 @@ type Field struct {
 }
 
 type Index struct {
-	Terms []string `datastore:"t"`
+	Created datetime.Timestamp `datastore:"c"`
+	Terms   []string           `datastore:"t"`
 }
 
 type Item struct {
@@ -108,8 +109,7 @@ type Session struct {
 	Client     string             `datastore:"c,noindex"`
 	Expires    datetime.Timestamp `datastore:"e"`
 	Initiated  time.Time          `datastore:"i,noindex"`
-	RememberMe bool               `datastore:"r,noindex"`
-	Salt       []byte             `datastore:"s,noindex"`
+	RememberMe bool               `datastore:"r"`
 }
 
 type User struct {
