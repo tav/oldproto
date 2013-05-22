@@ -13,7 +13,7 @@ import (
 var timePrefix string
 
 const (
-	PrefixFactor = 1 // Max: 256
+	PrefixFactor = 1
 )
 
 type Timestamp string
@@ -42,6 +42,9 @@ func UTC() time.Time {
 }
 
 func init() {
+	if PrefixFactor > 256 {
+		panic("datetime: the PrefixFactor cannot be greater than 256")
+	}
 	rand.Seed(time.Now().UnixNano())
 	timePrefix = string(rand.Int() % PrefixFactor)
 }
