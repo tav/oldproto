@@ -25,13 +25,65 @@ const (
 )
 
 const (
-	ByTerm           = "\x00"
-	SpaceTerm        = "\x01"
-	UserRefTerm      = "\x02"
-	WordTerm         = "\x03"
-	HashSpaceRefTerm = "\x04"
-	LinkRefTerm      = "\x05"
+	ByTerm string = string(iota)
+	SpaceTerm
+	UserRefTerm
+	WordTerm
+	HashSpaceRefTerm
+	LinkRefTerm
+	sentinel
 )
+
+//     Kind: A
+//     Key: ID
+//
+type Account struct {
+	Banned             bool   `datastore:"b"`
+	Confirmed          bool   `datastore:"c"`
+	Email              string `datastore:"e"`
+	InitialSpace       string `datastore:"i"`
+	MailingList        bool   `datastore:"m"`
+	NormalisedUsername string `datastore:"n"`
+	PendingSignup      User   `datastore:"p,noindex"`
+	Status             string `datastore:"s"`
+	Username           string `datastore:"u,noindex"`
+	Version            int    `datastore:"v"`
+}
+
+// AuthToken functions as a secure token that can be passed
+// between clients.
+//
+//     Kind: AT
+//     Parent: Login
+//     Key: ID
+//
+type AuthToken struct {
+	Created   int64              `datastore:"c,noindex"`
+	Expires   datetime.Timestamp `datastore:"e"`
+	Info      string             `datastore:"i,noindex"`
+	LongLived bool               `datastore:"l"`
+	Scopes    string             `datastore:"s,noindex"`
+	Type      string             `datastore:"t"`
+}
+
+type ReferenceToken struct {
+}
+
+// AuthLog stores some basic info about requests so as to
+// provide an audit trail for users to detect unauthorised
+// access.
+//
+//     Kind: AL
+//     Key: <username>/<acess-token-id>/<ip-addr>/<hash-of-client>
+//
+type AuthLog struct {
+	City        string    `datastore:"c,noindex"`
+	CityLatLong string    `datastore:"g,noindex"`
+	Country     string    `datastore:"n,noindex"`
+	LastSeen    time.Time `datastore:"l,noindex"`
+	Region      string    `datastore:"r,noindex"`
+	UserAgent   string    `datastore:"u,noindex"`
+}
 
 // Might be good to write a custom Marshaler to speed up
 // JSON Serialisation.
@@ -70,24 +122,42 @@ type Item struct {
 
 // Author | Publisher
 
-type Login struct {
-	Confirmed  bool         `datastore:"c"`
-	Email      string       `datastore:"e"`
+//     Parent: Login
+//     Key: 'p'
+//
+type LoginAuth struct {
 	Passphrase []byte       `datastore:"p,noindex"`
-	Scrypt     ScryptParams `datastore:"q,noindex"`
-	Status     string       `datastore:"s"`
-	Username   string       `datastore:"u"`
-	Version    int          `datastore:"v"`
+	Scrypt     ScryptParams `datastore:"s,noindex"`
 }
 
-type LoginEmail struct {
-	Email string `datastore:"e"`
-	Login int64  `datastore:"l"`
+//     Kind: EA
+//     Key: <normalised-email>
+//
+type EmailAccount struct {
+	Account int64 `datastore:"a"`
 }
 
-type LoginUsername struct {
-	Login    int64  `datastore:"l"`
-	Username string `datastore:"u"`
+//     Kind: GA
+//     Key: <normalised-github-email>
+//
+type GithubAccount struct {
+	Account int64 `datastore:"a"`
+}
+
+// OAuthToken contains a user's tokens for services that
+// support OAuth. It is embedded within other structs so as
+// to persist authentication with those services.
+type OAuthToken struct {
+	AccessToken  string    `datastore:"a,noindex"`
+	Expiry       time.Time `datastore:"e,noindex"`
+	RefreshToken string    `datastore:"r,noindex"`
+}
+
+//     Kind: UA
+//     Key: <normalised-username>
+//
+type UsernameAccount struct {
+	Account int64 `datastore:"a"`
 }
 
 type Namespace struct {
@@ -97,6 +167,8 @@ type Pointer struct {
 	Ref string
 }
 
+// ScryptParams stores the parameters used to derive the
+// Passphrase field of Account structs.
 type ScryptParams struct {
 	BlockSize       int    `datastore:"b,noindex"`
 	Iterations      int    `datastore:"i,noindex"`
@@ -105,17 +177,18 @@ type ScryptParams struct {
 	Parallelisation int    `datastore:"p,noindex"`
 }
 
-type Session struct {
-	Client     string             `datastore:"c,noindex"`
-	Expires    datetime.Timestamp `datastore:"e"`
-	Initiated  time.Time          `datastore:"i,noindex"`
-	RememberMe bool               `datastore:"r"`
-}
-
+//     Key: <normalised-username>
+//
 type User struct {
 	FullName string             `datastore:"f,noindex"`
 	Gender   string             `datastore:"g"`
 	Joined   datetime.Timestamp `datastore:"j"`
-	Location string             `datastore:"c"`
+	Location string             `datastore:"l"`
 	Version  int                `datastore:"v" json:"-"`
+}
+
+func init() {
+	if len(sentinel) > 1 {
+		panic("db: term constants exceed the byte range")
+	}
 }
