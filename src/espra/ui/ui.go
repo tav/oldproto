@@ -14,6 +14,7 @@ import (
 	"os"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 )
 
 var bodyNode = &html.Node{Data: "body", DataAtom: atom.Body, Type: html.ElementNode}
@@ -26,6 +27,7 @@ const (
 const (
 	ItemText lex.ItemType = 2 + iota
 	ItemIdentifier
+	ItemArgKey
 	ItemString
 	ItemNumber
 	ItemSpace
@@ -89,30 +91,38 @@ func EspraURI(l *lex.Lexer) lex.StateFn {
 	return InsideAction
 }
 
-func Builtin(l *lex.Lexer) lex.StateFn {
-	for {
-		if !IsValidIdentifierChar(l.Next()) {
-			l.Backup()
-			break
-		}
-	}
-	l.Emit(ItemBuiltin)
-	return InsideAction
-}
-
 func Identifier(l *lex.Lexer) lex.StateFn {
+	typ := ItemIdentifier
+	r, _ := utf8.DecodeRuneInString(l.Input[l.Start:])
+	if r == '!' {
+		l.Ignore()
+		typ = ItemBuiltin
+	}
 	for {
-		if !IsValidIdentifierChar(l.Next()) {
+		// should not appear in the first identifier of an expression of sub-expression (since it must be a function)
+		r = l.Next()
+
+		if r == ':' {
+			typ = ItemArgKey
+			l.Backup()
+			l.Emit(typ)
+			l.Next()
+			l.Ignore()
+			return InsideAction
+		}
+		if !IsValidIdentifierChar(r) {
 			l.Backup()
 			break
 		}
 	}
-	l.Emit(ItemIdentifier)
+	l.Emit(typ)
 	return InsideAction
 }
 
 func Number(l *lex.Lexer) lex.StateFn {
-	//
+	if !l.ScanNumber() {
+		return l.Errorf("bad number syntax: %q", l.Input[l.Start:l.Pos])
+	}
 	l.Emit(ItemNumber)
 	return InsideAction
 }
@@ -142,17 +152,6 @@ Loop:
 }
 
 func InsideAction(l *lex.Lexer) lex.StateFn {
-	// first identifier may be a func or a var --
-	// then everything is a var unless its the first identifier inside parens the its a func
-
-	// add keyword key:var
-	// add espraURI func or attr
-	// Number
-
-	// add if and for -- HTML5 parser ordered?
-
-	// deal with errors nicely
-	// reuse/reset the lexer
 
 	if strings.HasPrefix(l.Input[l.Pos:], rightDelim) {
 		if l.IntState[ActionParenDepth] > 0 {
@@ -171,7 +170,7 @@ func InsideAction(l *lex.Lexer) lex.StateFn {
 		return Identifier
 	case r == '!':
 		if unicode.IsLetter(l.Peek()) {
-			return Builtin
+			return Identifier
 		}
 		return l.Errorf("invalid character in builtin")
 	case r == '#' || r == '+':
@@ -179,7 +178,8 @@ func InsideAction(l *lex.Lexer) lex.StateFn {
 			return EspraURI
 		}
 		return l.Errorf("invalid character in URI")
-	case unicode.IsDigit(r):
+	case r == '-' || unicode.IsDigit(r):
+		l.Backup()
 		return Number
 	case r == '\'' || r == '"':
 		l.Emit(ItemOpenQuote)
@@ -198,13 +198,12 @@ func InsideAction(l *lex.Lexer) lex.StateFn {
 	return InsideAction
 }
 
-// Space scans a run of space characters.
-// One space has already been seen.
 func Space(l *lex.Lexer) lex.StateFn {
 	for lex.IsSpace(l.Peek()) {
 		l.Next()
 	}
 	l.Emit(ItemSpace)
+
 	return InsideAction
 }
 
@@ -251,8 +250,9 @@ var debugNames = map[lex.ItemType]string{
 	lex.ItemEOF:    "EOF",
 	ItemText:       "TEXT",
 	ItemIdentifier: "IDENTIFIER",
-	ItemString:     "STR",
-	ItemNumber:     "INT",
+	ItemArgKey:     "KEY",
+	ItemString:     "STRING",
+	ItemNumber:     "NUMBER",
 	ItemSpace:      "SPACE",
 	ItemLeftDelim:  "LEFT DELIM",
 	ItemRightDelim: "RIGHT DELIM",
@@ -265,20 +265,176 @@ var debugNames = map[lex.ItemType]string{
 	ItemCloseQuote: "QUOTE CLOSE",
 }
 
-func ParseTextNode(input string) (db.Domly, error) {
+func isTerminal(typ lex.ItemType) bool {
+	if typ == ItemString || typ == ItemNumber || typ == ItemIdentifier || typ == ItemBuiltin || typ == ItemEspraURI {
+		return true
+	}
+	return false
+}
 
-	l := createLexer("LextTextNode", input, LexTextNode)
-	for item := range l.Items {
-		fmt.Printf("Type: %20s\t %q\n", debugNames[item.Typ], item.Val)
-		if item.Typ == lex.ItemEOF {
-			break
-		}
-		if item.Typ == lex.ItemError {
-			return db.Domly{}, error(fmt.Errorf("Failed: %s", item.Val))
+type EOFError error
+
+func ParseArgKeyVal(l *lex.Lexer) (db.Domly, error) {
+	// get the value of a key-value argument of the form {{A B:C}}
+	for {
+		item := <-l.Items
+
+		switch typ := item.Typ; {
+		case typ == ItemLeftParen:
+			return ParseExpr(l, ItemRightParen)
+
+		case isTerminal(typ):
+			return db.Domly{typ, item.Val}, nil
+		case typ == ItemSpace:
+			continue
+		default:
+			return db.Domly{}, error(fmt.Errorf("Unexpected token %v in keyword value", item.Typ))
 		}
 	}
-	return db.Domly{}, nil
+}
 
+func ParseExpr(l *lex.Lexer, endDelimToken lex.ItemType) (db.Domly, error) {
+	// Opcodes are given as ['expr', {'key':val}, [ItemIdentifier, X],  [ItemIdentifier, Y], [ItemString, "string"] within an action without parens (or pipe) all identifiers are sequentially added to the same list
+
+	var item lex.Item
+	attrs := db.DomlyAttrs{}         // key-value arguments of the form {{A B:C}} are added to the Domly Attrs of the node
+	domly := db.Domly{"expr", attrs} //domly list for this level,
+	seen_argkey := false
+	first := true
+
+	for {
+		item = <-l.Items
+		fmt.Printf("Type: %20s\t %q\n", debugNames[item.Typ], item.Val)
+
+		switch typ := item.Typ; {
+		case typ == ItemLeftParen:
+			expr, err := ParseExpr(l, ItemRightParen)
+			if err != nil {
+				return domly, err
+			}
+			domly = append(domly, expr)
+
+		case isTerminal(typ):
+			// each terminal is appended as a domly sub-node [OpCodeInt, item.Val] except for
+			// if there are more than one terminals in an expression, the first must be an identifier since it must be a function (in the future this may change with the addition of binary operators)
+			if first != true {
+				first_domly := domly[2].(db.Domly)
+				first_typ := first_domly[0].(lex.ItemType)
+				first_val := first_domly[1].(string)
+				if first_typ == ItemString || first_typ == ItemNumber {
+					return domly, error(fmt.Errorf("Value '%v' Type '%v' cannot be evaluated as a function with arguments", first_val, debugNames[first_typ]))
+				}
+			}
+			if seen_argkey {
+				return domly, error(fmt.Errorf("argument cannot follow keyword argument"))
+			} else {
+				first = false
+				domly = append(domly, db.Domly{typ, item.Val})
+			}
+
+		case typ == ItemArgKey:
+			// the value to a keyword arg can either be a terminal or the outcome of an expression in which case it must be put in parentheses.
+			// the key:val is added to the Domly Attrs of the node
+			seen_argkey = true
+			if first == true {
+				return domly, error(fmt.Errorf("keyword arguments with no function"))
+			}
+			val, err := ParseArgKeyVal(l)
+			if err != nil {
+				return domly, err
+			}
+			attrs, boolean := domly[1].(db.DomlyAttrs)
+			if boolean {
+				attrs[item.Val] = val
+			}
+
+		case typ == endDelimToken:
+			// return the domly ast for the subexpression
+			return domly, nil
+
+		case typ == ItemRightDelim || typ == ItemRightParen || typ == lex.ItemEOF:
+			// expression ended wrong
+			return domly, error(fmt.Errorf("expected '%v' but got '%v'", debugNames[endDelimToken], debugNames[typ]))
+
+		case typ == ItemPipe:
+			// A|B === B(A) So when we see a pipe signal we put the previous identifer list as an argument to the current
+			pipe_receiver, err := ParseExpr(l, endDelimToken)
+			if err != nil {
+				return domly, err
+			}
+			// the domly expression up to now becomes an argument to the pipe_receiver
+			//return db.Domly{pipe_receiver, domly}, nil
+			return append(pipe_receiver, domly), nil
+
+		case typ == ItemLeftDelim || typ == ItemText:
+			return domly, error(fmt.Errorf("Unexpected %s inside an expression", debugNames[typ]))
+
+		case typ == lex.ItemError:
+			return db.Domly{}, error(fmt.Errorf("Lexer Failed: %s", item.Val))
+
+		}
+	}
+}
+
+func ParseIfExpr(iftext string) (db.Domly, error) {
+	// <a if="expr">
+	l := createLexer("LextIfExpr", iftext, InsideAction)
+	//var item lex.Item
+	//domly := db.Domly{} //domly list for this level
+	return ParseExpr(l, lex.ItemEOF)
+}
+
+func ParseForExpr(fortext string) (db.Domly, error) {
+	// for x,y,z in expr
+	l := createLexer("LextForExpr", fortext, InsideAction)
+	return ParseExpr(l, lex.ItemEOF)
+}
+
+func ParseTextNode(input string) (db.Domly, error) {
+	// in TextNode use <span> in attribute use <strip> tag that strips itself - js execution framework
+
+	l := createLexer("LextTextNode", input, LexTextNode)
+	var item lex.Item
+	var domly = db.Domly{} //domly list for this level,
+
+	for {
+		item = <-l.Items
+		fmt.Printf("Type: %20s\t %q\n", debugNames[item.Typ], item.Val)
+		switch typ := item.Typ; {
+		case typ == ItemText:
+			//ItemText is inserted directly as a string
+			domly = append(domly, item.Val)
+			fmt.Printf("val %v\n", domly)
+		case typ == ItemLeftDelim:
+			expr, err := ParseExpr(l, ItemRightDelim)
+			if err != nil {
+				return domly, err
+			}
+			domly = append(domly, expr)
+		case typ == lex.ItemEOF:
+			if len(domly) == 1 {
+				return domly, nil
+			}
+			return domly, nil
+		case typ == lex.ItemError:
+			return db.Domly{}, error(fmt.Errorf("Lexer Failed: %s", item.Val))
+
+		}
+	}
+}
+
+func extractVal(parsedTextNode db.Domly) interface{} {
+	inner := ""
+	if len(parsedTextNode) == 1 {
+		str, is_str := parsedTextNode[0].(string)
+		if is_str {
+			inner = str
+		}
+	}
+	if inner != "" {
+		return inner
+	}
+	return parsedTextNode
 }
 
 func GenDomlyNode(domNode *html.Node) (db.Domly, error) {
@@ -300,8 +456,11 @@ func GenDomlyNode(domNode *html.Node) (db.Domly, error) {
 				if domNode.Data == "label" && key == "for" {
 					key = "htmlFor"
 				}
-
-				attrs[key] = attr.Val
+				textNodeDomly, errr = ParseTextNode(attr.Val)
+				if errr != nil {
+					return data, errr
+				}
+				attrs[key] = extractVal(textNodeDomly)
 			}
 			data = append(data, attrs)
 		}
@@ -313,11 +472,12 @@ func GenDomlyNode(domNode *html.Node) (db.Domly, error) {
 				}
 				data = append(data, node)
 			} else if c.Type == html.TextNode {
-				textNodeDomly, errr = ParseTextNode(c.Data) // for each token parse attribute values and text node
+				textNodeDomly, errr = ParseTextNode(c.Data) // for each token parse attribute values and text node)
 				if errr != nil {
 					return data, errr
 				}
-				data = append(data, textNodeDomly)
+
+				data = append(data, extractVal(textNodeDomly))
 			}
 		}
 	}
