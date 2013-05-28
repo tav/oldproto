@@ -18,7 +18,7 @@ func main() {
 	opts := optparse.Parser("Usage: html2domly [options]", "v")
 
 	outputFile := opts.String([]string{"-o", "--output"}, "../coffee/templates.coffee", "coffeescript file to compile to", "PATH")
-	templatesSrcDir := opts.String([]string{"-i", "--input"}, "../etc/domly", "templatate source directory", "PATH")
+	templatesSrcDir := opts.String([]string{"-i", "--input"}, "../etc/domly", "template source directory", "PATH")
 	printJSON := opts.Bool([]string{"--print"}, false, "Print the JSON nicely to the output logger")
 
 	os.Args[0] = "html2domly"
