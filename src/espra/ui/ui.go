@@ -40,6 +40,9 @@ const (
 	ItemRightParen
 	ItemOpenQuote
 	ItemCloseQuote
+	ItemIf
+	ItemIn
+	ItemFor
 )
 const (
 	ActionParenDepth = iota
@@ -153,7 +156,7 @@ Loop:
 
 func InsideAction(l *lex.Lexer) lex.StateFn {
 
-	if strings.HasPrefix(l.Input[l.Pos:], rightDelim) {
+	if l.Name == "LexTextNode" && strings.HasPrefix(l.Input[l.Pos:], rightDelim) {
 		if l.IntState[ActionParenDepth] > 0 {
 			return l.Errorf("unmatched parentheses")
 		}
@@ -161,7 +164,13 @@ func InsideAction(l *lex.Lexer) lex.StateFn {
 	}
 
 	switch r := l.Next(); {
-	case r == lex.EOF || lex.IsEndOfLine(r):
+	case (r == lex.EOF || lex.IsEndOfLine(r)):
+		if l.Name == "LexIfExpr" {
+			return LexIfExpr
+		}
+		if l.Name == "LexForExpr" {
+			return LexForExpr
+		}
 		// if reach eof throw while still in action throw error
 		return l.Errorf("unclosed action")
 	case lex.IsSpace(r):
@@ -223,6 +232,54 @@ func LeftDelim(l *lex.Lexer) lex.StateFn {
 	l.Pos += lex.Pos(len(leftDelim))
 	l.Emit(ItemLeftDelim)
 	return InsideAction
+}
+
+func LexIfExpr(l *lex.Lexer) lex.StateFn {
+	if int(l.Pos) >= len(l.Input) {
+		l.Emit(lex.ItemEOF)
+		return nil
+	}
+	return InsideAction
+
+}
+
+func LoopIdentifier(l *lex.Lexer) lex.StateFn {
+	typ := ItemIdentifier
+	for {
+		r := l.Next()
+		if !IsValidIdentifierChar(r) {
+			l.Backup()
+			break
+		}
+	}
+	l.Emit(typ)
+	return LexForExpr
+}
+
+func LexForExpr(l *lex.Lexer) lex.StateFn {
+	if int(l.Pos) >= len(l.Input) {
+		l.Emit(lex.ItemEOF)
+		return nil
+	}
+	if strings.HasPrefix(l.Input[l.Pos:], "in") {
+		l.Pos += lex.Pos(2)
+		l.Emit(ItemIn)
+		return InsideAction
+	}
+
+	// any list of space separated identifiers
+	switch r := l.Next(); {
+	case lex.IsSpace(r):
+		for lex.IsSpace(l.Peek()) {
+			l.Next()
+		}
+		l.Emit(ItemSpace)
+		return LexForExpr
+	case unicode.IsLetter(r):
+		return LoopIdentifier
+	default:
+		return l.Errorf("Unexpected Character '%s'", string(r))
+	}
 }
 
 func LexTextNode(l *lex.Lexer) lex.StateFn {
@@ -378,28 +435,47 @@ func ParseExpr(l *lex.Lexer, endDelimToken lex.ItemType) (db.Domly, error) {
 
 func ParseIfExpr(iftext string) (db.Domly, error) {
 	// <a if="expr">
-	l := createLexer("LextIfExpr", iftext, InsideAction)
-	//var item lex.Item
-	//domly := db.Domly{} //domly list for this level
+	l := createLexer("LexIfExpr", iftext, LexIfExpr)
 	return ParseExpr(l, lex.ItemEOF)
 }
 
 func ParseForExpr(fortext string) (db.Domly, error) {
-	// for x,y,z in expr
-	l := createLexer("LextForExpr", fortext, InsideAction)
-	return ParseExpr(l, lex.ItemEOF)
+	// e.g. <a for="x y z in expr">{{x.name}}</a>
+	l := createLexer("LexForExpr", fortext, LexForExpr)
+	loopVars := db.Domly{}
+	domly := db.Domly{}
+	var err error
+	var item lex.Item
+	for {
+		item = <-l.Items
+		switch typ := item.Typ; {
+		case typ == ItemIdentifier:
+			loopVars = append(loopVars, item.Val)
+		case typ == ItemIn:
+			domly, err = ParseExpr(l, lex.ItemEOF)
+			return db.Domly{loopVars, domly}, err
+		case typ == ItemSpace:
+			continue
+		// should always hit the EOF in ParseExpr
+		case typ == lex.ItemEOF:
+			return db.Domly{}, error(fmt.Errorf("Unexpected EOF in : %s", fortext))
+		case typ == lex.ItemError:
+			return db.Domly{}, error(fmt.Errorf("Lexer Failed: %s", item.Val))
+		default:
+			return db.Domly{}, error(fmt.Errorf("Unexpected token in : %s", fortext))
+		}
+	}
 }
 
 func ParseTextNode(input string) (db.Domly, error) {
 	// in TextNode use <span> in attribute use <strip> tag that strips itself - js execution framework
 
-	l := createLexer("LextTextNode", input, LexTextNode)
+	l := createLexer("LexTextNode", input, LexTextNode)
 	var item lex.Item
 	var domly = db.Domly{} //domly list for this level,
 
 	for {
 		item = <-l.Items
-		fmt.Printf("Type: %20s\t %q\n", debugNames[item.Typ], item.Val)
 		switch typ := item.Typ; {
 		case typ == ItemText:
 			//ItemText is inserted directly as a string
@@ -439,14 +515,16 @@ func extractVal(parsedTextNode db.Domly) interface{} {
 
 func GenDomlyNode(domNode *html.Node) (db.Domly, error) {
 	data := db.Domly{}
+	data_wrappers := []db.Domly{}
 	var textNodeDomly db.Domly
 	var node db.Domly
 
 	var errr error
 	errr = nil
+
 	if domNode.Type == html.ElementNode {
 		data = append(data, domNode.Data)
-		if len(domNode.Attr) != 0 { // != nil {
+		if len(domNode.Attr) != 0 {
 			attrs := db.DomlyAttrs{}
 			for _, attr := range domNode.Attr {
 				key := attr.Key
@@ -456,11 +534,25 @@ func GenDomlyNode(domNode *html.Node) (db.Domly, error) {
 				if domNode.Data == "label" && key == "for" {
 					key = "htmlFor"
 				}
-				textNodeDomly, errr = ParseTextNode(attr.Val)
-				if errr != nil {
-					return data, errr
+				if key == "if" {
+					if_expr, err := ParseIfExpr(attr.Val)
+					if err != nil {
+						return if_expr, err
+					}
+					data_wrappers = append(data_wrappers, db.Domly{ItemIf, db.DomlyAttrs{"if": if_expr}})
+				} else if key == "for" {
+					for_expr, err := ParseForExpr(attr.Val)
+					if err != nil {
+						return for_expr, err
+					}
+					data_wrappers = append(data_wrappers, db.Domly{ItemFor, db.DomlyAttrs{"for": for_expr[0], "in": for_expr[1]}})
+				} else {
+					textNodeDomly, errr = ParseTextNode(attr.Val)
+					if errr != nil {
+						return textNodeDomly, errr
+					}
+					attrs[key] = extractVal(textNodeDomly)
 				}
-				attrs[key] = extractVal(textNodeDomly)
 			}
 			data = append(data, attrs)
 		}
@@ -476,12 +568,15 @@ func GenDomlyNode(domNode *html.Node) (db.Domly, error) {
 				if errr != nil {
 					return data, errr
 				}
-
 				data = append(data, extractVal(textNodeDomly))
 			}
 		}
 	}
-
+	// apply if and for wrappers
+	// not ideal as it breaks tail recursion
+	for i := len(data_wrappers) - 1; i >= 0; i-- {
+		data = append(data_wrappers[i], data)
+	}
 	return data, nil
 }
 
