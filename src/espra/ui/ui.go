@@ -11,7 +11,9 @@ import (
 	"espra/db"
 	"espra/lex"
 	"fmt"
+	"net/url"
 	"os"
+	"regexp"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -34,6 +36,7 @@ const (
 	ItemLeftDelim
 	ItemRightDelim
 	ItemBuiltin
+	ItemURI
 	ItemEspraURI
 	ItemPipe
 	ItemLeftParen
@@ -47,6 +50,7 @@ const (
 const (
 	ActionParenDepth = iota
 )
+const scheme = "^(http|https|aim|amp|callto|data|dict|dns|fax|fb|feed|file|freenet|ftp|geo|git|gtalk|im|irc|ircs|itms|lastfm|magnet|mailto|maps|md5|mms|msnim|news|nntp|psyc|rsync|rtsp|secondlife|sftp|sha|sip|sips|skype|sms|spotify|ssh|svn|tag|tel|urn|uuid|webcal|xmpp|xri|ymsgr)$"
 
 var replacements = map[string]string{
 	"cellpadding":     "cellPadding",
@@ -282,8 +286,30 @@ func LexForExpr(l *lex.Lexer) lex.StateFn {
 	}
 }
 
+func LexURI(l *lex.Lexer) lex.StateFn {
+	l.Emit(ItemURI)
+	return LexTextNode
+}
+
 func LexTextNode(l *lex.Lexer) lex.StateFn {
 	for {
+		r := l.Next()
+		if lex.IsAlphaNumeric(l.Peek()) {
+			if lex.IsSpace(r) || lex.IsEndOfLine(r) {
+				l.Emit(ItemText)
+			}
+			i := lex.Pos(strings.IndexAny(l.Input[l.Pos:], " \t\n\r"))
+			if i != -1 {
+				i = l.Pos + i
+			} else {
+				i = lex.Pos(len(l.Input) - 1)
+			}
+			if strings.Contains(l.Input[l.Pos:i], ":") {
+				l.Pos = i
+				return LexURI
+			}
+		}
+		l.Backup()
 		if strings.HasPrefix(l.Input[l.Pos:], leftDelim) {
 			if l.Pos > l.Start {
 				l.Emit(ItemText)
@@ -314,7 +340,8 @@ var debugNames = map[lex.ItemType]string{
 	ItemLeftDelim:  "LEFT DELIM",
 	ItemRightDelim: "RIGHT DELIM",
 	ItemBuiltin:    "BUILTIN",
-	ItemEspraURI:   "URI IDENTIFIER",
+	ItemURI:        "URI",
+	ItemEspraURI:   "ESPRA URI",
 	ItemPipe:       "PIPE",
 	ItemLeftParen:  "LEFT PARENS",
 	ItemRightParen: "RIGHT PARENS",
@@ -323,7 +350,7 @@ var debugNames = map[lex.ItemType]string{
 }
 
 func isTerminal(typ lex.ItemType) bool {
-	if typ == ItemString || typ == ItemNumber || typ == ItemIdentifier || typ == ItemBuiltin || typ == ItemEspraURI {
+	if typ == ItemString || typ == ItemNumber || typ == ItemIdentifier || typ == ItemBuiltin || typ == ItemURI || typ == ItemEspraURI {
 		return true
 	}
 	return false
@@ -361,7 +388,6 @@ func ParseExpr(l *lex.Lexer, endDelimToken lex.ItemType) (db.Domly, error) {
 
 	for {
 		item = <-l.Items
-		fmt.Printf("Type: %20s\t %q\n", debugNames[item.Typ], item.Val)
 
 		switch typ := item.Typ; {
 		case typ == ItemLeftParen:
@@ -467,6 +493,18 @@ func ParseForExpr(fortext string) (db.Domly, error) {
 	}
 }
 
+func ParseURI(item lex.Item) (db.Domly, error) {
+	var err error
+	u, err := url.Parse(item.Val)
+	if err == nil {
+		m, _ := regexp.MatchString(scheme, u.Scheme)
+		if m {
+			return db.Domly{"uri", u.Scheme, u.Host, u.Path}, err
+		}
+	}
+	return db.Domly{}, error(fmt.Errorf("URL Parsing Fails: %s", item.Val))
+}
+
 func ParseTextNode(input string) (db.Domly, error) {
 	// in TextNode use <span> in attribute use <strip> tag that strips itself - js execution framework
 
@@ -479,7 +517,15 @@ func ParseTextNode(input string) (db.Domly, error) {
 		switch typ := item.Typ; {
 		case typ == ItemText:
 			//ItemText is inserted directly as a string
-			domly = append(domly, item.Val)
+			domly = append(domly, item)
+			fmt.Printf("val %v\n", domly)
+		case typ == ItemURI:
+			uri, err := ParseURI(item)
+			if err != nil {
+				item.Typ = ItemText
+				domly = append(domly, item)
+			}
+			domly = append(domly, uri)
 			fmt.Printf("val %v\n", domly)
 		case typ == ItemLeftDelim:
 			expr, err := ParseExpr(l, ItemRightDelim)
