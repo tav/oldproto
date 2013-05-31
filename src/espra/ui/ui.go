@@ -517,13 +517,13 @@ func ParseTextNode(input string) (db.Domly, error) {
 		switch typ := item.Typ; {
 		case typ == ItemText:
 			//ItemText is inserted directly as a string
-			domly = append(domly, item)
+			domly = append(domly, item.Val)
 			fmt.Printf("val %v\n", domly)
 		case typ == ItemURI:
 			uri, err := ParseURI(item)
 			if err != nil {
 				item.Typ = ItemText
-				domly = append(domly, item)
+				domly = append(domly, item.Val)
 			}
 			domly = append(domly, uri)
 			fmt.Printf("val %v\n", domly)
