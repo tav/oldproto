@@ -8,18 +8,9 @@ import (
 	"espra/db"
 	"espra/ident"
 	"espra/rpc"
+	"espra/ui"
 	"fmt"
 )
-
-type WebLink struct {
-	Host string
-	URL  string
-}
-
-// Returns (domlyAsJSON, references, slashTag, hostURIs)
-func parseMsg(message string, terms []string) ([]byte, []string, string, []*WebLink) {
-	return []byte("[]"), []string{"foo", "bar"}, "", []*WebLink{}
-}
 
 type CreateRequest struct {
 	By      string
@@ -48,7 +39,7 @@ func Create(ctx *rpc.Context, req *CreateRequest) error {
 	terms = append(terms, db.ByTerm+item.By[1:])
 
 	index := &db.Index{}
-	item.Domly, index.Terms, item.SlashTag, _ = parseMsg(req.Head, terms)
+	item.Domly, index.Terms, item.SlashTag, _ = ui.parseMsg(req.Head, terms)
 	_ = datastore.Delete
 
 	return nil
