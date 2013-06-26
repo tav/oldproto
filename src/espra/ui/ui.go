@@ -38,6 +38,8 @@ const (
 	ItemBuiltin
 	ItemURI
 	ItemEspraURI
+	ItemHashTag
+	ItemSlashTag
 	ItemPipe
 	ItemLeftParen
 	ItemRightParen
@@ -46,7 +48,34 @@ const (
 	ItemIf
 	ItemIn
 	ItemFor
+	ItemWord
 )
+
+var debugNames = map[lex.ItemType]string{
+	lex.ItemError:  "ERROR",
+	lex.ItemEOF:    "EOF",
+	ItemText:       "TEXT",
+	ItemIdentifier: "IDENTIFIER",
+	ItemArgKey:     "KEY",
+	ItemString:     "STRING",
+	ItemNumber:     "NUMBER",
+	ItemSpace:      "SPACE",
+	ItemLeftDelim:  "LEFT DELIM",
+	ItemRightDelim: "RIGHT DELIM",
+	ItemBuiltin:    "BUILTIN",
+	ItemEspraURI:   "ESPRA URI",
+	ItemHashTag:    "HASH TAG",
+	ItemURI:        "EXTERNAL URI",
+	ItemPipe:       "PIPE",
+	ItemLeftParen:  "LEFT PARENS",
+	ItemRightParen: "RIGHT PARENS",
+	ItemOpenQuote:  "QUOTE OPEN",
+	ItemCloseQuote: "QUOTE CLOSE",
+	ItemIf:         "IF STATEMENT",
+	ItemIn:         "IN STATEMENT",
+	ItemFor:        "FOR STATEMENT",
+}
+
 const (
 	ActionParenDepth = iota
 )
@@ -87,7 +116,7 @@ func createLexer(name, input string, startfn lex.StateFn) *lex.Lexer {
 }
 
 func IsValidIdentifierChar(r rune) bool {
-	if unicode.IsDigit(r) || unicode.IsLetter(r) || r == '_' || r == '-' || r == '.' {
+	if unicode.IsDigit(r) || unicode.IsLetter(r) || r == '-' || r == '.' {
 		return true
 	}
 	return false
@@ -244,7 +273,6 @@ func LexIfExpr(l *lex.Lexer) lex.StateFn {
 		return nil
 	}
 	return InsideAction
-
 }
 
 func LoopIdentifier(l *lex.Lexer) lex.StateFn {
@@ -328,29 +356,8 @@ func LexTextNode(l *lex.Lexer) lex.StateFn {
 	return nil
 }
 
-var debugNames = map[lex.ItemType]string{
-	lex.ItemError:  "ERROR",
-	lex.ItemEOF:    "EOF",
-	ItemText:       "TEXT",
-	ItemIdentifier: "IDENTIFIER",
-	ItemArgKey:     "KEY",
-	ItemString:     "STRING",
-	ItemNumber:     "NUMBER",
-	ItemSpace:      "SPACE",
-	ItemLeftDelim:  "LEFT DELIM",
-	ItemRightDelim: "RIGHT DELIM",
-	ItemBuiltin:    "BUILTIN",
-	ItemURI:        "URI",
-	ItemEspraURI:   "ESPRA URI",
-	ItemPipe:       "PIPE",
-	ItemLeftParen:  "LEFT PARENS",
-	ItemRightParen: "RIGHT PARENS",
-	ItemOpenQuote:  "QUOTE OPEN",
-	ItemCloseQuote: "QUOTE CLOSE",
-}
-
 func isTerminal(typ lex.ItemType) bool {
-	if typ == ItemString || typ == ItemNumber || typ == ItemIdentifier || typ == ItemBuiltin || typ == ItemURI || typ == ItemEspraURI {
+	if typ == ItemString || typ == ItemNumber || typ == ItemIdentifier || typ == ItemBuiltin || typ == ItemEspraURI || typ == ItemHashTag || typ == ItemURI {
 		return true
 	}
 	return false
