@@ -51,7 +51,7 @@ func main() {
 		runtime.StandardError(err)
 	}
 
-	out.Write([]byte("define 'templates', (exports) ->\n"))
+	out.Write([]byte("define 'templates', (exports, root) ->\n"))
 
 	for _, name := range names {
 		if strings.HasSuffix(name, ".html") {
