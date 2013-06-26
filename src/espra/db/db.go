@@ -27,12 +27,19 @@ const (
 const (
 	ByTerm string = string(iota)
 	SpaceTerm
-	UserRefTerm
+
 	WordTerm
-	HashSpaceRefTerm
-	LinkRefTerm
+	EspraURITerm // PlusSpace
+	HashTagTerm  // HashSpace
+	URITerm      //external absolute and relative URIs
+	SlashTagTerm
 	sentinel
 )
+
+type WebLink struct {
+	Host string
+	URL  string
+}
 
 type AccessToken struct {
 }
