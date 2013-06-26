@@ -8,12 +8,15 @@ generate:
       - raw: |
           // Public Domain (-) 2011-2013 The Espra Authors.
           // See the Espra UNLICENSE file for details.
-      - https://raw.github.com/tav/jsutil/master/define.coffee
       - https://raw.github.com/tav/jsutil/master/ucd.js
       - coffee/domly.coffee
       - coffee/templates.coffee
       - coffee/notifi.coffee
       - coffee/client.coffee
+
+- test.js:
+   source:
+      - coffee/test.coffee
 
 - gfx/*:
     source: etc/gfx/*
@@ -25,6 +28,7 @@ generate:
 
 - init.js:
     source:
+      - https://raw.github.com/tav/jsutil/master/define.coffee
       - coffee/init.coffee
     compress: true
 
