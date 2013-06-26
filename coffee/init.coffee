@@ -1,7 +1,8 @@
 # Public Domain (-) 2011-2013 The Espra Authors.
 # See the Espra UNLICENSE file for details.
 
-((root, doc, ASSETS, BGCOLOR, STATIC, TYPEKIT) ->
+define 'init', (exports, root) ->
+ ((root, doc, ASSETS, BGCOLOR, STATIC, TYPEKIT) ->
 
   # We declare a few property names to help with minification.
   appendChild = 'appendChild'
@@ -20,7 +21,7 @@
   body = doc.body
 
   # Utility function to load the CSS stylesheet at the given `path`.
-  CSS = (path) ->
+  CSS = exports.CSS = (path) ->
     s = doc[createElement] 'link'
     s.rel = 'stylesheet'
     s.href = "#{STATIC}#{path}"
@@ -31,7 +32,7 @@
   width = 240 # [keep this synced with the stylesheet]
   step = target = width / 10
   finished = false
-  finishReq = 3
+  finishReq = 1
 
   incr = ->
     if (target + step) > width
@@ -50,7 +51,7 @@
     return
 
   # Utility function to load the JavaScript at the given `path`.
-  JS = (path, callback) ->
+  JS = exports.JS = (path, callback) ->
     s = doc[createElement] 'script'
     s.onload = ->
       if not s._l
@@ -176,7 +177,6 @@
       body.removeChild wrap
       espra.focus()
     return
-
   progress()
 
   # Utility function to repeatedly verify that a predicate has been satisfied
@@ -204,15 +204,15 @@
     , finish
 
   # Load TypeKit.
-  JS "//use.typekit.net/#{TYPEKIT}.js", ->
-    try
-      Typekit.load
-        active: finish
-        inactive: finish
-    catch e
-    incr()
-    return
-
+  #JS "http://use.typekit.net/#{TYPEKIT}.js", ->
+  #  try
+  #    Typekit.load
+  #      active: finish
+  #      inactive: finish
+  #  catch e
+  #  incr()
+  #  return
+  
   # Load the client.
   JS "#{STATIC}#{ASSETS['client.js']}", ->
     espra.run incr
@@ -221,4 +221,4 @@
 
   return
 
-)(window, document, ASSETS, $BGCOLOR, $STATIC, $TYPEKIT)
+ )(window, document, ASSETS, $BGCOLOR, $STATIC, $TYPEKIT)

@@ -7,20 +7,22 @@ define 'espra', (exports, root) ->
   doc.$ = doc.getElementById
   body = doc.body
   domly = exports.domly
-  local = root.localStorage
+  local = root.localStorage 
+  local['auth'] = 1
 
   # Create the root #body container element.
-  container = doc.createElement 'div'
+  exports.container = container = doc.createElement 'div'
   container.id = 'body'
   container.style.display = 'none'
   body.appendChild container
 
   $focus = null
-  exports.focus = ->
-    body.style.height = '100%'
-    body.className = 'bg'
-    container.style.display = 'block'
-    $focus.focus()
+  focus = exports.focus = ->
+    if $focus
+      body.style.height = '100%'
+      body.className = 'bg'
+      container.style.display = 'block'
+      $focus.focus()
     return
 
   handleLogin = (e) ->
@@ -141,6 +143,7 @@ define 'espra', (exports, root) ->
           ['hr', class: 'clear']
         ],
     ]
+
     domly data, container
     $focus = doc.$ 'login-user'
 
@@ -153,5 +156,12 @@ define 'espra', (exports, root) ->
 
     if local['auth'] isnt '1'
       showHomeScreen()
-
+    else
+      # setup client master view logic
+      # load  resource specific modules including compiled templates, view code, sass and data APIs as ASSETS, 
+      # then load resource specifc data and bind to modules
+      # load_modules {MODULES}
+      init.JS "#{$STATIC}#{ASSETS['test.js']}", ->
+        test.run()
+    return
   return
